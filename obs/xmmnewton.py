@@ -346,8 +346,7 @@ class ObservationXMM:
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
             python_ds9.set("zoom to fit")
-            python_ds9.set(
-                f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+            #python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
     def check_pileup(self, src_name):
         """
