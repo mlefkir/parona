@@ -10,7 +10,7 @@ These classes make use of SAOimageDS9 to select regions on images.
 
 The heasoft package and the SAS must be initalised.
 
-Tested with SAS 20.0.
+Tested with SAS 20.0
 
 
 ### Python dependencies
