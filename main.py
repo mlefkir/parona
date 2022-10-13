@@ -28,7 +28,7 @@ obs_xmm.gen_flarelc()
 obs_xmm.gen_gti()
 obs_xmm.gen_clean_evts()
 obs_xmm.gen_images()
-#obs_xmm.find_start_time()
+obs_xmm.find_start_time()
 
 #start_time_xmm = obs_xmm.start_time
 #plot_gti_nustar_xmm_portions(start_time_xmm,loc)
