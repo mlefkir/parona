@@ -10,7 +10,7 @@ from astropy.io import fits
 from astropy.table import Table
 import contextlib
 import shutil
-from tools.callds9 import start_ds9
+from ..tools.callds9 import start_ds9
 
 
 class ObservationXMM:
