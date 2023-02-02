@@ -3,7 +3,7 @@ import glob
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
-from tools.callds9 import start_ds9
+from ..tools.callds9 import start_ds9
 
 def energy2nustarchannel(energy_keV):
     return (energy_keV - 1.6)/0.04
@@ -39,9 +39,9 @@ class ObservationNuSTAR:
             self.obs_files[instr] = {}
             self.regions[instr] = {}
 
-        self.energybands = [[3.0, 10.0], [10.0, 40.0]]
+        self.energybands = k[[3.0, 10.0], [10.0, 79.0]]
         self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
-            np.array(self.energybands).flatten())]
+            np.array(self.s).flatten())]
 
         self.check_repertories(path)
         self.replot = True

@@ -39,7 +39,7 @@ class ObservationXMM:
             self.obs_files[instr] = {}
             self.regions[instr] = {}
 
-        self.energybands = [[500, 3000], [3000, 10000]]
+        self.energybands = kwargs.get("energybands",[[500, 3000], [3000, 10000]])
         self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
             np.array(self.energybands).flatten())]
         self.check_repertories(path)
