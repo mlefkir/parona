@@ -23,6 +23,7 @@ class ObservationXMM:
     path/data/obsid_datadir
     path/obsid_workdir
     path/obsid_workdir/logs
+    path/obsid_workdir/plots
 
     """
 
@@ -49,6 +50,23 @@ class ObservationXMM:
         self.replot = True
 
     def check_repertories(self, path):
+        """Check the repertories and create them if they don't exist
+
+        Following the folder tree described in the class docstring:
+        
+            path/odf
+            path/data/obsid_datadir
+            path/obsid_workdir
+            path/obsid_workdir/logs
+            path/obsid_workdir/plots
+
+        Parameters
+        ----------
+        path : str
+            Path to the folder where the repertories will be created
+        """
+        
+        
         if not os.path.isdir(f'{path}/odf'):
             os.mkdir(f'{path}/odf')
 
@@ -74,6 +92,11 @@ class ObservationXMM:
         """
         Get the observation data file (ODF) archive from the repertory odf or from
         the XMM-Newton XSA database.
+        
+        If the ODF is not in the odf repertory, will download it from the XSA database using
+        the astroquery package.
+        
+        
         """
         if not glob.glob(f"{self.odfdir}/{self.ID}.*") == []:
             self.obs_files["ODF"] = glob.glob(f"{self.odfdir}/{self.ID}.*")[0]
@@ -128,9 +151,9 @@ class ObservationXMM:
 
     def gen_evts(self):
         """
-
         Generate the event list the EPIC pn and MOS CCD
 
+        will run epproc and emproc if the event list is not already present in the workdir
         """
 
         os.chdir(self.workdir)
