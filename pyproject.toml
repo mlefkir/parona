@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parona"
+authors = [
+    {name = "Mehdy Lefkir", email = "mehdylefkir.work@gmail.com"},
+]
+description = "Scripts for data reduction of observations."
+readme = "README.md"
+requires-python = ">=3.6"
+dependencies = [
+    "numpy",
+    "scipy","matplotlib","astropy","shutil","pyds9"
+    ]
+version = "0.1.0"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]

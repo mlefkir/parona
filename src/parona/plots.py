@@ -1,6 +1,6 @@
 from astropy.io import fits
 from matplotlib.patches import Rectangle
-from tools.converters import xmm2nu,nu2xmm
+from .converters import xmm2nu,nu2xmm
 
 import numpy as np
 import matplotlib.pyplot as plt

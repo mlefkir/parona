@@ -1,5 +1,5 @@
-from obs.nustar import ObservationNuSTAR
-from obs.xmmnewton import ObservationXMM
+from parona import ObservationNuSTAR
+from parona import ObservationXMM
 import os
 
 obsid_xmm =  ""

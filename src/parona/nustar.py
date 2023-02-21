@@ -3,7 +3,7 @@ import glob
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
-from ..tools.callds9 import start_ds9
+from .callds9 import start_ds9
 
 def energy2nustarchannel(energy_keV):
     return (energy_keV - 1.6)/0.04
