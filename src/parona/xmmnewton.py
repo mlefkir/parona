@@ -43,6 +43,7 @@ class ObservationXMM:
         self.energybands = kwargs.get("energybands",[[500, 3000], [3000, 10000]])
         self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
             np.array(self.energybands).flatten())]
+        print(f"Energy range: {self.energy_range}")
         self.check_repertories(path)
         self.get_odf()
         self.extract_odf()
@@ -405,7 +406,7 @@ class ObservationXMM:
                 shutil.move(self.obs_files[instr]["epatplot"],
                             f"{self.plotdir}/{self.obs_files[instr]['epatplot']}")
 
-    def gen_lightcurves(self, src_name):
+    def gen_lightcurves(self, src_name,binning):
         """
 
         Generate light curves for source and background for all energy bands
@@ -418,9 +419,11 @@ class ObservationXMM:
             # https://xmm-tools.cosmos.esa.int/external/xmm_user_support/documentation/uhb/epicmode.html
             tag = "nobin"
             binsize = {"EPN": 73.4e-3, "EMOS1": 2.6, "EMOS2": 2.6}
+        
         else:
             tag = ""
-            binsize = {"EPN": 1000, "EMOS1": 1000, "EMOS2": 1000}
+            # binsize = {"EPN": 1000, "EMOS1": 1000, "EMOS2": 1000}
+            binsize = dict.fromkeys(self.instruments, binning)
 
         print('<  INFO  > : Generating light-curves')
         for instr in self.instruments:
@@ -470,9 +473,12 @@ class ObservationXMM:
 
     def plot_lightcurves(self, src_name):
         # --- pdf light curves for energies 0.5-3 3-10 keV
-
+        list_energies = []
+        for energy_range in self.energybands:
+            low, up = energy_range
+            list_energies.append(f"{low/1000}-{up/1000}")
         fig, ax = plt.subplots(2, 1, figsize=(8, 9))
-        for (axis, energies) in zip(ax, ["0.5-3.0", "3.0-10.0"]):
+        for (axis, energies) in zip(ax,list_energies):
             for instr in self.instruments:
                 hdu_list = fits.open(
                     f"{self.workdir}/{self.ID}_{src_name}{instr}_lc_clean_{energies}.fits")
