@@ -423,7 +423,8 @@ class ObservationXMM:
         else:
             tag = ""
             # binsize = {"EPN": 1000, "EMOS1": 1000, "EMOS2": 1000}
-            binsize = dict.fromkeys(self.instruments, binning)
+            assert len(binning) == len(self.instruments), f"Binning must be specified for each instrument : {self.instruments}"
+            binsize = dict(zip(self.instruments, binning))
 
         print('<  INFO  > : Generating light-curves')
         for instr in self.instruments:
