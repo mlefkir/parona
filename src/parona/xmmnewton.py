@@ -40,7 +40,7 @@ class ObservationXMM:
             self.obs_files[instr] = {}
             self.regions[instr] = {}
 
-        self.energybands = kwargs.get("energybands",[[500, 3000], [3000, 10000]])
+        self.energybands = kwargs.get("energybands",[[200, 3000], [3000, 12000]])
         self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
             np.array(self.energybands).flatten())]
         print(f"Energy range: {self.energy_range}")
@@ -406,7 +406,7 @@ class ObservationXMM:
                 shutil.move(self.obs_files[instr]["epatplot"],
                             f"{self.plotdir}/{self.obs_files[instr]['epatplot']}")
 
-    def gen_lightcurves(self, src_name,binning):
+    def gen_lightcurves(self, src_name,binning,absolute_corrections=False):
         """
 
         Generate light curves for source and background for all energy bands
@@ -430,31 +430,45 @@ class ObservationXMM:
         for instr in self.instruments:
             print(f'\t<  INFO  > : Processing instrument : {instr}')
 
-            if len(glob.glob(f"{self.workdir}/*{src_name}{instr}*lc_src*")) != len(self.energybands):
-                for name_tag in ['src', 'bkg']:
-                    for energy_range in self.energybands:
-                        low, up = energy_range
-                        lc_name = f"{self.workdir}/{self.ID}_{src_name}{instr}_lc{tag}_{name_tag}_{low/1000}-{up/1000}.fits"
-                        if glob.glob(lc_name) == []:
-                            if "PN" in instr:
-                                expression = f'#XMMEA_EP && (PATTERN<=4) && (PI in [{low}:{up}]) && ((X,Y) IN {self.regions[instr][name_tag]})'
-                            else:
-                                expression = f'#XMMEA_EM && (PATTERN<=12) && (PI in [{low}:{up}]) && ((X,Y) IN {self.regions[instr][name_tag]})'
-                                
-                            inargs = [f'table={self.obs_files[instr]["clean_evts"]}', 
-                                      'withrateset=yes',
-                                      f'rateset={lc_name}',
-                                      f'timebinsize={binsize[instr]}',
-                                      'maketimecolumn=yes',
-                                      'makeratecolumn=yes',
-                                      f'expression={expression}']
-                            
-                            print(
-                                f'\t\t<  INFO  > : Generate {name_tag} light curves {low/1000}-{up/1000} keV')
-                            with open(f"{self.logdir}/{src_name}{instr}_{name_tag}_{low/1000}-{up/1000}_lc{tag}_light_curve.log", "w+") as f:
-                                with contextlib.redirect_stdout(f):
-                                    w("evselect", inargs).run()
+            # if len(glob.glob(f"{self.workdir}/*{src_name}{instr}*lc_src*")) != len(self.energybands):
+            for name_tag in ['src', 'bkg']:
+                for energy_range in self.energybands:
+                    low, up = energy_range
+                    
+                    self.obs_files[instr][f"clean_{name_tag}_{low/1000}_{up/1000}"] = f"{self.workdir}/{self.ID}_{instr}_clean_{name_tag}_{low/1000}_{up/1000}_evts_clean.fits"
+                    lc_name = f"{self.workdir}/{self.ID}_{src_name}{instr}_lc{tag}_{name_tag}_{low/1000}-{up/1000}.fits"
+                    self.obs_files[instr][f"{src_name}_lc_src_{low/1000}_{up/1000}"] = lc_name
 
+                    if glob.glob(lc_name) == []:
+                        if "PN" in instr:
+                            expression = f'#XMMEA_EP && (PATTERN<=4) && (PI in [{low}:{up}]) && ((X,Y) IN {self.regions[instr][name_tag]})'
+                        else:
+                            expression = f'#XMMEA_EM && (PATTERN<=12) && (PI in [{low}:{up}]) && ((X,Y) IN {self.regions[instr][name_tag]})'
+                            
+                        inargs = [f'table={self.obs_files[instr]["clean_evts"]}', 
+                                'withfilteredset=yes',
+                                f'filteredset={self.obs_files[instr][f"clean_{name_tag}_{low/1000}_{up/1000}"]}',
+                                'keepfilteroutput=yes', 
+                                f'expression={expression}']
+                        
+                        print(f'\t\t<  INFO  > : Generate {name_tag} event list {low/1000}-{up/1000} keV')
+                        with open(f"{self.logdir}/{src_name}{instr}_{name_tag}_{low/1000}-{up/1000}_lc{tag}_light_curve.log", "w+") as f:
+                            with contextlib.redirect_stdout(f):
+                                w("evselect", inargs).run()
+
+                        inargs = [f'table={self.obs_files[instr]["clean_evts"]}', 
+                                    'withrateset=yes',
+                                    f'rateset={lc_name}',
+                                    f'timebinsize={binsize[instr]}',
+                                    'maketimecolumn=yes',
+                                    'makeratecolumn=yes',
+                                    f'expression={expression}']
+                        
+                        print(
+                            f'\t\t<  INFO  > : Generate {name_tag} light curves {low/1000}-{up/1000} keV')
+                        with open(f"{self.logdir}/{src_name}{instr}_{name_tag}_{low/1000}-{up/1000}_lc{tag}_light_curve.log", "w+") as f:
+                            with contextlib.redirect_stdout(f):
+                                w("evselect", inargs).run()
             # ---light curves corrected from background
             for energy_range in self.energybands:
                 low, up = energy_range
@@ -463,7 +477,7 @@ class ObservationXMM:
                     lc_src = f"{self.workdir}/{self.ID}_{src_name}{instr}_lc{tag}_src_{low/1000}-{up/1000}.fits"
                     lc_bkg = f"{self.workdir}/{self.ID}_{src_name}{instr}_lc{tag}_bkg_{low/1000}-{up/1000}.fits"
                     inargs = [f'srctslist={lc_src}', f'eventlist={self.obs_files[instr]["clean_evts"]}', f'outset={lc_clean}',
-                              f'bkgtslist={lc_bkg}', 'withbkgset=yes', 'applyabsolutecorrections=yes']
+                              f'bkgtslist={lc_bkg}', 'withbkgset=yes', f'applyabsolutecorrections={absolute_corrections}']
                     print(
                         f'\t<  INFO  > : Running epiclccorr to correct light curves {low/1000}-{up/1000} keV')
                     with open(f"{self.logdir}/{src_name}{instr}_{low/1000}-{up/1000}_{tag}epiclccorr.log", "w+") as f:
@@ -471,6 +485,8 @@ class ObservationXMM:
                             w("epiclccorr", inargs).run()
         if (not self.nobin) and self.replot:
             self.plot_lightcurves(src_name)
+
+    
 
     def plot_lightcurves(self, src_name):
         # --- pdf light curves for energies 0.5-3 3-10 keV
@@ -531,7 +547,170 @@ class ObservationXMM:
         self.start_time = max(Start)
         print("Instrument start : ",self.instruments[np.argmax(Start)])
         return self.start_time
+    
+    def get_backscale_value(self, instr, src_name):
+        
+        backscale = []
+        print(f"\t<  INFO  > : Generating spectra to get backscale value for {instr}")
+        if instr == "EPN":
+            specchanmax = 20479
+            pattern = 4
+            flag = "(FLAG==0) "
+        else:
+            specchanmax = 11999
+            pattern = 12
+            flag = "#XMMEA_EM "
+            
+        for name_tag in ["src", "bkg"]:
+            # ---generate the spectrum
+            output_spectrum = f"{self.workdir}/{self.ID}_{src_name}{instr}_spectrum_{name_tag}_BACKSCALE.fits"
+            if instr == "EPN":
+                flag = "(FLAG==0) "
+            elif instr == "EMOS1" or instr == "EMOS2":
+                flag = "#XMMEA_EM "
+            expression = f"{flag} && (PATTERN <={pattern}) && ((X,Y) IN {self.regions[instr][name_tag]})"
+            
+            inargs = [f'table={self.obs_files[instr]["clean_evts"]}',
+                        'withspectrumset=yes',
+                        f'spectrumset={output_spectrum}',
+                        'energycolumn=PI', 
+                        'spectralbinsize=5',
+                        'withspecranges=yes', 
+                        'specchannelmin=0',
+                        f'specchannelmax={specchanmax}', 
+                        f'expression={expression}']
+            
+            if glob.glob(output_spectrum) == []:
+                print(f'<  INFO  > : Generate {name_tag} spectrum for BACKSCALE')
+                with open(f"{self.logdir}/{src_name}{instr}_{name_tag}_spectrum_BACKSCALE.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("evselect", inargs).run()
+                # run backscale
+                inargs = [f'spectrumset={output_spectrum}']
+                with open(f"{self.logdir}/{src_name}{instr}_{name_tag}_backscale_BACKSCALE.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("backscale", inargs).run()
+            backscale.append(fits.open(output_spectrum)[1].header["BACKSCAL"])
+            print(fits.open(output_spectrum)[1].header["BACKSCAL"])   
+        return backscale[0]/backscale[1]   
+        
+        
+    def correct_GTI_timeseries(self,time_src,start_GTI,stop_GTI,dt):
 
+        maxi = len(time_src)-1
+        k = 0
+        L = []
+
+        time = time_src - dt/2 # time_src is the middle of the time bin
+        
+        for i in range(maxi):
+            if time[i] < start_GTI[k]:
+                print('Start of the time bin is before the start of the good time interval')
+                if time[i+1] < start_GTI[k]:
+                    print('1. End of the time bin is before the start of the good time interval')
+                    print(f'i={i} Time bin is not in any good time interval\n')
+                    L.append(0)
+                else:
+                    print('2. End of the time bin is after the start of the good time interval')
+                    if time[i+1] < stop_GTI[k]:
+                        print('2.1. End of the time bin is before the end of the good time interval')
+                        fracexp = (time[i+1]-start_GTI[k])/(time[i+1]-time[i])
+                    else:
+                        print('2.2. End of the time bin is after the end of the good time interval')
+                        fracexp = (stop_GTI[k]-start_GTI[k])/(time[i+1]-time[i])
+
+                        j = k+1
+                        while time[i+1] > start_GTI[j]:
+                            print(f'2.2.1 j = {j}')
+                            if time[i+1] < stop_GTI[j]:
+                                fracexp += (time[i+1]-start_GTI[j])/(time[i+1]-time[i])
+                                k = j
+                                print(f'BREAK: {k}')
+                                break
+                            fracexp += (stop_GTI[j]-start_GTI[j])/(time[i+1]-time[i])
+                            j += 1
+                        k = j
+                    print(fracexp)
+                    print(f'i={i} Time bin is partially in the good time interval\n')
+                    L.append(fracexp)
+                    # k = k+1
+            else:
+                if time[i+1] < stop_GTI[k]:
+                    print(f'i={i} 3. Time bin is fully in the good time interval\n')
+                    L.append(1)
+                    
+                else:
+                    print(f'4. End of the time bin is after the end of the good time interval')
+                    
+                    fracexp = (stop_GTI[k]-time[i])/(time[i+1]-time[i])
+                    j = k+1
+                    while time[i+1] > start_GTI[j]:
+                        print(f'j = {j}')
+                        if time[i+1] < stop_GTI[j]:
+                            fracexp += (time[i+1]-start_GTI[j])/(time[i+1]-time[i])
+                            k = j
+                            print(f'BREAK: {j}')
+                            break
+                        fracexp += (stop_GTI[j]-start_GTI[j])/(time[i+1]-time[i])
+                        print(f"iterate {j} {fracexp}")
+                        j += 1
+                    
+                    k = j
+                    print(fracexp)
+                    print(f'i={i} Time bin is partially in the good time interval\n')
+                    
+                    L.append(fracexp)
+                    
+        if time[-1] >= start_GTI[k] :
+            if time[-1]+dt < stop_GTI[k]:
+                L.append(1)
+            else:
+                fracexp = (stop_GTI[k]-time[-1])/(dt)
+                L.append(fracexp)
+        else:
+            L.append(0)
+            
+        return np.array(L)
+
+    def rescale_rate(self,time_src,start_GTI,stop_GTI,rate_src,rate_err_src,rate_bkg,rate_err_bkg,dt,scale):
+        corr_gti = self.correct_GTI_timeseries(time_src,start_GTI,stop_GTI,dt)
+        rate_corrected = np.copy(rate_src)-np.copy(rate_bkg)*scale
+        nonzero_corr = np.where(corr_gti != 0)
+        rate_corrected[nonzero_corr] = (rate_src[nonzero_corr]-rate_bkg[nonzero_corr])/corr_gti[nonzero_corr]
+        rate_err_corrected = np.sqrt(rate_err_src**2 + (rate_err_bkg*scale)**2)
+        return rate_corrected, rate_err_corrected,corr_gti
+
+    def write_fits(self,time_src,rate,rate_err,corr_gti,filename):
+        PRIMARY = fits.PrimaryHDU()
+        RATE_TABLE = fits.BinTableHDU.from_columns([fits.Column(name='TIME', format='D', array=time_src),fits.Column(name='RATE', format='D', array=rate),fits.Column(name='ERROR', format='D', array=rate_err),fits.Column(name='FRACEXP', format='D', array=corr_gti)])
+        RATE_TABLE.name = 'RATE'
+        hdu_list = fits.HDUList([PRIMARY,RATE_TABLE])
+        print(f'Writing {filename}...')
+        print(hdu_list.info())
+        print(hdu_list[1].header)
+        print(hdu_list[1].data)
+        hdu_list.writeto(f'manual_{filename}_lightcurve.fits', overwrite=True)
+        return hdu_list
+    
+    def create_lightcurve(self,instr,src_name):
+        
+        for energy_range in self.energybands:
+            low, up = energy_range
+            filename = f'{src_name}_lc_{instr}_{low/1000}_{up/1000}'
+                        
+            src_lc = fits.open(f"{self.workdir}/{self.ID}_{src_name}{instr}_lc_src_{low/1000}-{up/1000}.fits")
+            bkg_lc = fits.open(f"{self.workdir}/{self.ID}_{src_name}{instr}_lc_bkg_{low/1000}-{up/1000}.fits")
+            pn_gti = fits.open(self.obs_files[instr]["gti"])
+
+            start_GTI, stop_GTI = pn_gti['STDGTI'].data['START'], pn_gti['STDGTI'].data['STOP']
+            rate_src, rate_err_src, time_src = src_lc['RATE'].data['RATE'], src_lc['RATE'].data['ERROR'], src_lc['RATE'].data['TIME']
+            rate_bkg, rate_err_bkg, time_bkg = bkg_lc['RATE'].data['RATE'], bkg_lc['RATE'].data['ERROR'], bkg_lc['RATE'].data['TIME']
+            dt = time_src[1]-time_src[0]
+            scale = self.get_backscale_value(instr,src_name)
+            rate_corrected, rate_err_corrected,corr_gti = self.rescale_rate(time_src,start_GTI,stop_GTI,rate_src,rate_err_src,rate_bkg,rate_err_bkg,dt,scale)
+            hdulist = self.write_fits(time_src,rate_corrected,rate_err_corrected,corr_gti,filename)
+            return hdulist
+        
     def gen_spectra(self, src_name, **kwargs):
         """
 
