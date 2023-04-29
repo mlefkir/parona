@@ -1,11 +1,10 @@
 import os
-import sys
-import tarfile
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import date
 from pysas.wrapper import Wrapper as w
+from astroquery.esa.xmm_newton import XMMNewton
 from astropy.io import fits
 from astropy.table import Table
 import contextlib
@@ -27,12 +26,27 @@ class ObservationXMM:
 
     """
 
-    def __init__(self, path, obsidentifier, date, **kwargs):
+    def __init__(self, path, obsidentifier, **kwargs):
+        
         self.ID = obsidentifier
-        self.date = date
+        print(f"<  INFO  > : Observation ID: {self.ID}")
+        print(f"<  INFO  > : Retrieving observation information from the XSA TAP service")
+        query = XMMNewton.query_xsa_tap(f"select * from v_public_observations where observation_id='{obsidentifier}' ")
+        query2 = XMMNewton.query_xsa_tap(f"select * from v_exposure where observation_id='{obsidentifier}' ")
+
+
+        self.date = query['start_utc'][0][:10]
         self.slices = kwargs.get('slices', ["all"])
         self.nslices = kwargs.get('nslices', 0)
-        self.instruments = ["EPN", "EMOS1", "EMOS2"]
+        
+        self.instruments = kwargs.get('instruments',["EPN", "EMOS1", "EMOS2"])
+        if isinstance(self.instruments, str):
+            self.instruments = [self.instruments]
+        self.instruments_mode = []
+        filt_sci = query2['is_scientific']
+        for instr in self.instruments:
+            self.instruments_mode.append(query2['mode_friendly_name'][filt_sci][query2['instrument'][filt_sci] =='EPN'][0])
+        
         self.obs_files = {}
         self.regions = {}
 
@@ -43,12 +57,28 @@ class ObservationXMM:
         self.energybands = kwargs.get("energybands",[[200, 3000], [3000, 12000]])
         self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
             np.array(self.energybands).flatten())]
-        print(f"Energy range: {self.energy_range}")
+        print(f"\t<  INFO  > : Energy range: {self.energy_range}")
         self.check_repertories(path)
-        self.get_odf()
-        self.extract_odf()
 
         self.replot = True
+        # execute startsas which is is a wrapper for the SAS command line tools
+        # cifbuild and odfingest, will set SAS_CCF and SAS_ODF environment variables
+        # if already set then execute again but with different arguments
+        if not glob.glob(f"{self.workdir}/ccf.cif")  or not glob.glob(f"{self.workdir}/*SUM.SAS"):
+            print("<  INFO  > : Executing startsas for the first time")
+            inargs = [f'odfid={self.ID}',f'workdir={self.workdir}']
+            with open(f"{self.logdir}/startsas.log", "w+") as f:
+                with contextlib.redirect_stdout(f):
+                    w('startsas', inargs).run()
+        else:
+            print("<  INFO  > : Executing startsas again")
+            inargs = [f'sas_ccf={glob.glob(f"{self.workdir}/ccf.cif")[0]}', f'sas_odf={glob.glob(f"{self.workdir}/*SUM.SAS")[0]}', f'workdir={self.workdir}']
+            with open(f"{self.logdir}/startsas_bis.log", "w+") as f:
+                with contextlib.redirect_stdout(f):
+                    w('startsas', inargs).run()
+                
+                
+        os.chdir(self.workdir)
 
     def check_repertories(self, path):
         """Check the repertories and create them if they don't exist
@@ -67,14 +97,6 @@ class ObservationXMM:
             Path to the folder where the repertories will be created
         """
         
-        
-        if not os.path.isdir(f'{path}/odf'):
-            os.mkdir(f'{path}/odf')
-
-        if not os.path.isdir(f'{path}/data'):
-            os.mkdir(f'{path}/data')
-        if not os.path.isdir(f'{path}/data/{self.ID}_datadir'):
-            os.mkdir(f'{path}/data/{self.ID}_datadir')
         if not os.path.isdir(f'{path}/{self.ID}_workdir'):
             os.mkdir(f'{path}/{self.ID}_workdir')
         if not os.path.isdir(f'{path}/{self.ID}_workdir/logs'):
@@ -82,79 +104,26 @@ class ObservationXMM:
         if not os.path.isdir(f'{path}/{self.ID}_workdir/plots'):
             os.mkdir(f'{path}/{self.ID}_workdir/plots')
 
-        self.odfdir = f'{path}/odf'
-        self.datadir = f'{path}/data/{self.ID}_datadir/'
         self.workdir = f'{path}/{self.ID}_workdir/'
         self.logdir = f'{path}/{self.ID}_workdir/logs/'
         self.plotdir = f'{path}/{self.ID}_workdir/plots/'
         os.environ["SAS_WORKDIR"] = self.workdir
 
-    def get_odf(self):
-        """
-        Get the observation data file (ODF) archive from the repertory odf or from
-        the XMM-Newton XSA database.
-        
-        If the ODF is not in the odf repertory, will download it from the XSA database using
-        the astroquery package.
-        
-        
-        """
-        if not glob.glob(f"{self.odfdir}/{self.ID}.*") == []:
-            self.obs_files["ODF"] = glob.glob(f"{self.odfdir}/{self.ID}.*")[0]
-            print("<  INFO  > : ODF already downloaded")
-        else:
-            print("<  INFO  > : Downloading ODF")
-            from astroquery.esa.xmm_newton import XMMNewton
-
-            XMMNewton.download_data(
-                f'{self.ID}', level="ODF", filename=f"{self.odfdir}/{self.ID}.tar")
-            self.obs_files["ODF"] = glob.glob(f"{self.odfdir}/{self.ID}.*")[0]
-
-    def extract_odf(self):
-        """
-        Extract the ODF archive into the datadir folder.
-        """
-        if not os.listdir(self.datadir):
-            import tarfile
-            print(f'<  INFO  > : Extracting the ODF')
-            tf = tarfile.open(self.obs_files["ODF"], mode='r')
-            if os.listdir(path=self.datadir) == []:
-                tf.extractall(path=self.datadir, numeric_owner=True)
-            if glob.glob(f'{self.datadir}/*TAR') != [] or len(glob.glob(f'{self.datadir}/*')) < 10:
-                tf = tarfile.open(
-                    glob.glob(f'{self.datadir}/*TAR')[0], mode='r')
-                tf.extractall(path=self.datadir, numeric_owner=True)
-                os.remove(glob.glob(f'{self.datadir}/*TAR')[0])
-
-    def calibrate(self):
-        """
-
-        Calibrate the ODF with cifbuild and odfingest
-
-        """
-        os.chdir(self.workdir)
-        os.environ["SAS_ODF"] = self.datadir
-        if not len(glob.glob(f"{self.logdir}/cifbuild.log")) > 0:
-            print(f'<  INFO  > : Running cifbuild to calibrate observation')
-            with open(f"{self.logdir}/cifbuild.log", "w+") as f:
-                with contextlib.redirect_stdout(f):
-                    w("cifbuild", []).run()
-            os.chdir(self.workdir)
-        os.environ["SAS_CCF"] = f'{self.workdir}/ccf.cif'
-
-        if not len(glob.glob(f'{self.workdir}/*SUM.SAS')) > 0:
-            print(f'<  INFO  > : Running odfingest')
-            with open(f"{self.logdir}/odfingest.log", "w+") as f:
-                with contextlib.redirect_stdout(f):
-                    w("odfingest", [
-                      f'outdir={self.workdir}', f'odfdir={self.datadir}']).run()
-        os.environ["SAS_ODF"] = glob.glob(f'{self.workdir}/*SUM.SAS')[0]
-
-    def gen_evts(self):
+ 
+    def gen_evts(self, with_emproc=True, with_RGS=False, with_OM=False):
         """
         Generate the event list the EPIC pn and MOS CCD
 
-        will run epproc and emproc if the event list is not already present in the workdir
+        will run epproc by default and emproc if the event list is not already present in the workdir
+        
+        Parameters
+        ----------
+        with_emproc : bool, optional
+            If True, will run emproc to generate the event list for the EPIC MOS CCDs, by default True
+        with_RGS : bool, optional
+            If True, will run rgsproc to generate the event list for the RGS, by default False
+        with_OM : bool, optional
+        
         """
 
         os.chdir(self.workdir)
@@ -163,26 +132,66 @@ class ObservationXMM:
             with open(f"{self.logdir}/epproc.log", "w+") as f:
                 with contextlib.redirect_stdout(f):
                     w("epproc", []).run()
-        if glob.glob(f"{self.workdir}/*MOS*ImagingEvts*") == [] and ("EMOS1" in self.instruments or "EMOS2" in self.instruments):
-            print(f'<  INFO  > : Running emproc to generate events list for the EPIC-MOS 1 & 2')
-            with open(f"{self.logdir}/emproc.log", "w+") as f:
+        if with_emproc:
+            if glob.glob(f"{self.workdir}/*MOS*ImagingEvts*") == [] and ("EMOS1" in self.instruments or "EMOS2" in self.instruments):
+                print(f'<  INFO  > : Running emproc to generate events list for the EPIC-MOS 1 & 2')
+                with open(f"{self.logdir}/emproc.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("emproc", []).run()
+        if with_RGS:
+            with open(f"{self.logdir}/rgsproc.log", "w+") as f:
+                print(f'<  INFO  > : Running rgsproc to generate events list for the RGS 1 & 2')
                 with contextlib.redirect_stdout(f):
-                    w("emproc", []).run()
+                    w("rgsproc", []).run()
+                    
+        if with_OM:
+            with open(f"{self.logdir}/omichain.log", "w+") as f:
+                print(f'<  INFO  > : Running omichain to generate events list for the OM')
+                with contextlib.redirect_stdout(f):
+                    w("omichain", []).run()
+                     
 
         for instr in self.instruments:
             self.obs_files[instr]["evts"] = self.find_eventfile(instr)
+            print(f'<  INFO  > : The raw event list selected for {instr} is: {self.obs_files[instr]["evts"].replace(self.workdir,"")}')
+    
+    def find_RGS_eventfiles(self):
+        """
+        Return the raw event list file
+        
+        If there is only one event list file in the workdir, it will return it.
+        Else, it will return the biggest file in the workdir.
+        """
+        for instr in ["R1", "R2"]:
+            self.obs_files[instr] = {}
+            buff = glob.glob(f"{self.workdir}/*{instr}*EVENLI*")
+            size = 0
+            if len(buff) == 1:
+                input_eventfile = buff[0]
+            else:
+                for i,res in enumerate(buff):
+                    if os.path.getsize(res) > size:
+                        size = os.path.getsize(res)
+                        input_eventfile = buff[i]
+            self.obs_files[instr]["evts"] = input_eventfile
 
     def find_eventfile(self, instr):
         """
-        Return the event list file
+        Return the raw event list file
+        
+        If there is only one event list file in the workdir, it will return it.
+        Else, it will return the biggest file in the workdir.
         """
         buff = glob.glob(f"{self.workdir}/*{instr}_*ImagingEvts*")
+        size = 0
         if len(buff) == 1:
             input_eventfile = buff[0]
         else:
-            for res in buff:
-                if "_S" in res:
-                    input_eventfile = res
+            for i,res in enumerate(buff):
+                if os.path.getsize(res) > size:
+                    size = os.path.getsize(res)
+                    input_eventfile = buff[i]
+
         return input_eventfile
 
     def gen_flarelc(self):
@@ -199,9 +208,6 @@ class ObservationXMM:
             self.obs_files[instr]["flare"] = f"{self.workdir}/{self.ID}_{instr}_FlareBKGRate.fits"
 
             if glob.glob(self.obs_files[instr]["flare"]) == []:
-                print(
-                    f'\t<  INFO  > : Using event list : {self.obs_files[instr]["evts"]}')
-
                 if "PN" in instr:
                     expression = '#XMMEA_EP&&(PI>10000.&&PI<12000.)&&(PATTERN==0.)'
                 else:
@@ -406,33 +412,49 @@ class ObservationXMM:
                 shutil.move(self.obs_files[instr]["epatplot"],
                             f"{self.plotdir}/{self.obs_files[instr]['epatplot']}")
 
-    def gen_lightcurves(self, src_name,binning,absolute_corrections=False):
+    def gen_lightcurves(self, src_name,binning,absolute_corrections=False,write_bin_tag=False):
         """
 
         Generate light curves for source and background for all energy bands
         Generate background subtracted light-curve
+        
+        https://xmm-tools.cosmos.esa.int/external/xmm_user_support/documentation/uhb/epicmode.html
+
+        Parameters
+        ----------
+        src_name: str
+            Name of the source
+        binning: list or float
+            Binning for each instrument,
+        absolute_corrections: bool, optional
+            Apply absolute corrections to the light-curves, by default False
+        write_bin_tag: bool, optional
+            Write the binning tag in the light-curve file name, by default False
 
         """
-        self.nobin = False
-        if self.nobin:
-            # Time resolution of the EPIC Camera
-            # https://xmm-tools.cosmos.esa.int/external/xmm_user_support/documentation/uhb/epicmode.html
-            tag = "nobin"
-            binsize = {"EPN": 73.4e-3, "EMOS1": 2.6, "EMOS2": 2.6}
-        
-        else:
-            tag = ""
-            # binsize = {"EPN": 1000, "EMOS1": 1000, "EMOS2": 1000}
-            assert len(binning) == len(self.instruments), f"Binning must be specified for each instrument : {self.instruments}"
-            binsize = dict(zip(self.instruments, binning))
+        if isinstance(binning, list) and len(binning) != len(self.instruments):
+            raise ValueError(f"Length of binning list must be equal to the number of instruments ({len(self.instruments)})")
+        if isinstance(binning, float) or isinstance(binning, int):
+            binning = [binning]*len(self.instruments)
+            
+        if write_bin_tag:
+            tags = [f"_bin{b}" for b in binning]
+            
+        binsize = dict(zip(self.instruments, binning))
 
         print('<  INFO  > : Generating light-curves')
+        
+        # instru
         for instr in self.instruments:
             print(f'\t<  INFO  > : Processing instrument : {instr}')
-
-            # if len(glob.glob(f"{self.workdir}/*{src_name}{instr}*lc_src*")) != len(self.energybands):
+            if write_bin_tag:
+                tag = tags[self.instruments.index(instr)]
+            else:
+                tag = ""
             for name_tag in ['src', 'bkg']:
+                
                 for energy_range in self.energybands:
+                    
                     low, up = energy_range
                     
                     self.obs_files[instr][f"clean_{name_tag}_{low/1000}_{up/1000}"] = f"{self.workdir}/{self.ID}_{instr}_clean_{name_tag}_{low/1000}_{up/1000}_evts_clean.fits"
@@ -478,18 +500,17 @@ class ObservationXMM:
                     lc_bkg = f"{self.workdir}/{self.ID}_{src_name}{instr}_lc{tag}_bkg_{low/1000}-{up/1000}.fits"
                     inargs = [f'srctslist={lc_src}', f'eventlist={self.obs_files[instr]["clean_evts"]}', f'outset={lc_clean}',
                               f'bkgtslist={lc_bkg}', 'withbkgset=yes', f'applyabsolutecorrections={absolute_corrections}']
-                    print(
-                        f'\t<  INFO  > : Running epiclccorr to correct light curves {low/1000}-{up/1000} keV')
+                    print(f'\t<  INFO  > : Running epiclccorr to correct light curves {low/1000}-{up/1000} keV')
                     with open(f"{self.logdir}/{src_name}{instr}_{low/1000}-{up/1000}_{tag}epiclccorr.log", "w+") as f:
                         with contextlib.redirect_stdout(f):
                             w("epiclccorr", inargs).run()
-        if (not self.nobin) and self.replot:
-            self.plot_lightcurves(src_name)
+
+        self.plot_lightcurves(src_name, tag)
 
     
 
-    def plot_lightcurves(self, src_name):
-        # --- pdf light curves for energies 0.5-3 3-10 keV
+    def plot_lightcurves(self, src_name, tag):
+
         list_energies = []
         for energy_range in self.energybands:
             low, up = energy_range
@@ -497,12 +518,10 @@ class ObservationXMM:
         fig, ax = plt.subplots(2, 1, figsize=(8, 9))
         for (axis, energies) in zip(ax,list_energies):
             for instr in self.instruments:
-                hdu_list = fits.open(
-                    f"{self.workdir}/{self.ID}_{src_name}{instr}_lc_clean_{energies}.fits")
+                hdu_list = fits.open(f"{self.workdir}/{self.ID}_{src_name}{instr}_lc{tag}_clean_{energies}.fits")
                 lc_data = Table(hdu_list[1].data)
                 lc_data["TIME"] -= lc_data["TIME"][0]
-                axis.errorbar(lc_data["TIME"]/1000, lc_data["RATE"],
-                              yerr=lc_data["ERROR"], fmt="o", markersize=5., label=instr)
+                axis.errorbar(lc_data["TIME"]/1000, lc_data["RATE"], yerr=lc_data["ERROR"], fmt="o", markersize=5., label=instr)
                 axis.legend(loc='upper left', bbox_to_anchor=(1, 0.9))
             axis.set_title(f"{energies} keV")
             axis.set_xlabel("Time (ks)")
@@ -519,12 +538,21 @@ class ObservationXMM:
 
         """
         incidents_MOS1_CCD = [[6, "2005-03-09"], [3, "2012-12-11"]]
+        print("<  INFO  > : Try to find the start time for the slices")
 
         Start = []
-        for instr in self.instruments:
+        for counter,instr in enumerate(self.instruments):
             if instr == "EPN":
-                nCCD = 12
-                list_CCD = range(1, nCCD+1)
+                if self.instruments_mode[counter] == "Small Window":
+                    print("\t<  INFO  > : EPN in Small window mode")
+                    nCCD = 1
+                    list_CCD = [4]
+                elif self.instruments_mode[counter] == "Full Frame":
+                    print("\t<  INFO  > : EPN in Full frame mode")
+                    nCCD = 12
+                    list_CCD = range(1, nCCD+1)
+                else:
+                    raise NotImplementedError(f"EPN mode {self.instruments_mode[counter]} not implemented")
             else:
                 nCCD = 7
                 list_CCD = range(1, nCCD+1)
@@ -711,12 +739,134 @@ class ObservationXMM:
             hdulist = self.write_fits(time_src,rate_corrected,rate_err_corrected,corr_gti,filename)
             return hdulist
         
-    def gen_spectra(self, src_name, **kwargs):
+    def RGS_disp(self):
+        """    
+        
+        rgsimplot endispset='my_pi.fit' spatialset='my_spatial.fit' \
+     srcidlist='1' srclistset='PxxxxxxyyyyRrzeeeSRCLI_0000.FIT' \
+     device=/xs
+  
+    """
+        self.find_RGS_eventfiles()
+        for instr in ['R1','R2']:
+            
+            srcli = glob.glob(f"P*{instr}*SRCLI*")[0]
+
+            if glob.glob(f"{self.ID}_{instr}_spatial.fits") == []:
+                print(f'<  INFO  > : Generate spatial image for {instr}')
+                inargs = [f'table={self.obs_files[instr]["evts"]}:EVENTS',
+                          'xcolumn=M_LAMBDA',
+                          'ycolumn=XDSP_CORR',  
+                          f'imageset={self.ID}_{instr}_spatial.fits']
+                with open(f"{self.logdir}/{instr}_spatial.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("evselect", inargs).run()
+
+            if glob.glob(f"{self.ID}_{instr}_PI_image.fits") == []:
+                print(f'<  INFO  > : Generate PI image for {instr}')
+                inargs = [f'table={self.obs_files[instr]["evts"]}:EVENTS',
+                            'xcolumn=M_LAMBDA',
+                            'ycolumn=PI','yimagemin=0','yimagemax=3000',
+                            f'imageset={self.ID}_{instr}_PI_image.fits',
+                            f'expression=REGION({srcli}:RGS{instr[-1]}_SRC1_SPATIAL,M_LAMBDA,XDSP_CORR)']
+                with open(f"{self.logdir}/{instr}_PI_image.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("evselect", inargs).run()
+            if glob.glob(f"{self.ID}_{instr}_disp.png") == []:
+                inargs = [f'endispset={self.ID}_{instr}_PI_image.fits',
+                          f'spatialset={self.ID}_{instr}_spatial.fits',
+                          f'srclistset={srcli}','colour=3','invert=no',              
+                          f'plotfile={self.ID}_{instr}_disp.png',
+                          f'device=/png']
+                
+                with open(f"{self.logdir}/{instr}_rgsimplot.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("rgsimplot", inargs).run()
+           
+           
+    def RGS_background_lightcurve(self,bin_size=100):
+        """      evselect table=PxxxxxxyyyyRrzeeeEVENLI0000.FIT timebinsize=100 \
+     rateset=my_rgs1_background_lc.fit \
+     makeratecolumn=yes maketimecolumn=yes \
+     expression='(CCDNR==9)&&(REGION(PxxxxxxyyyyRrzeeeSRCLI_0000.FIT:RGS1_BACKGROUND,M_LAMBDA,XDSP_CORR))'"""
+        self.find_RGS_eventfiles()
+        print(' INFO  : Generate background lightcurves for RGS')
+        for instr in ['R1','R2']:
+
+            srcli = glob.glob(f"P*{instr}*SRCLI*")[0]
+
+            if glob.glob(f"{self.ID}_{instr}_background_lc.fits") == []:
+                print(f' INFO  : Generate background lightcurves for {instr}')
+
+                inargs = [f'table={self.obs_files[instr]["evts"]}',
+                    f'rateset={self.ID}_{instr}_background_lc.fits',
+                    f'timebinsize={bin_size}',
+                    f'makeratecolumn=yes',
+                    f'maketimecolumn=yes',
+                    f'expression=CCDNR==9&&REGION({srcli}:RGS{instr[-1]}_BACKGROUND,M_LAMBDA,XDSP_CORR)']
+                with open(f"{self.logdir}/{instr}_bkg_lc.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("evselect", inargs).run()
+            # plot the lightcurve
+        if glob.glob(f"{self.plotdir}/{self.ID}_RGS_background_lc.pdf") and self.replot:
+            print(f' INFO  : Plot background lightcurves for {instr}')
+            hdu1 = fits.open(f"{self.ID}_R1_background_lc.fits")[1].data
+            hdu2 = fits.open(f"{self.ID}_R2_background_lc.fits")[1].data
+            fig, ax = plt.subplots(2,1,figsize=(13,9))
+            ax[0].errorbar(hdu1['TIME']-hdu1['TIME'][0],hdu1['RATE'],yerr=hdu1['ERROR'],fmt='o',color='k')
+            ax[0].set_xlabel('Time (s)')
+            ax[0].set_ylabel('Rate (cts/s)')
+            ax[0].set_title('RGS1',fontsize=18)
+            ax[1].errorbar(hdu2['TIME']-hdu2['TIME'][0],hdu2['RATE'],yerr=hdu2['ERROR'],fmt='o',color='k')
+            ax[1].set_xlabel('Time (s)')
+            ax[1].set_ylabel('Rate (cts/s)')
+            ax[1].set_title('RGS2',fontsize=18)
+            fig.tight_layout()
+            fig.savefig(f"{self.plotdir}/{self.ID}_RGS_background_lc.pdf")
+
+
+    def RGS_plot_lightcurve(self):
+        print(' INFO  : Generate lightcurves for RGS')
+        for order in [1,2]:
+            if glob.glob(f"{self.plotdir}/{self.ID}_RGS_O{order}_lc.pdf") == [] or self.replot:
+                print(f' INFO  : Plot RGS lightcurves for order {order}')
+                src_1 = glob.glob(f"P{self.ID}R1*SRTSR_{order}*")[0]
+                src_2 = glob.glob(f"P{self.ID}R2*SRTSR_{order}*")[0]
+                bkg_1 = glob.glob(f"P{self.ID}R1*BGTSR_{order}*")[0]
+                bkg_2 = glob.glob(f"P{self.ID}R2*BGTSR_{order}*")[0]
+                hdu1 = fits.open(src_1)[1].data
+                hdu2 = fits.open(src_2)[1].data
+                hdu3 = fits.open(bkg_1)[1].data
+                hdu4 = fits.open(bkg_2)[1].data
+                fig, ax = plt.subplots(2,1,figsize=(13,9))
+                ax[0].errorbar(hdu1['TIME']-hdu1['TIME'][0],hdu1['RATE'],yerr=hdu1['ERROR'],fmt='o',color='k',label='Source')
+                # similar to the background lightcurve,
+                # ax[0].errorbar(hdu1['TIME']-hdu1['TIME'][0],hdu1['BACKV'],yerr=hdu1['BACKE'],fmt='o',color='g',label='Source-BKG')
+                ax[0].errorbar(hdu3['TIME']-hdu3['TIME'][0],hdu3['RATE'],yerr=hdu3['ERROR'],fmt='o',color='r',label='Background')
+                ax[0].set_xlabel('Time (s)')
+                ax[0].set_ylabel('Rate (cts/s)')
+                ax[0].set_title('RGS1',fontsize=18)
+                ax[0].legend()
+                ax[1].errorbar(hdu2['TIME']-hdu2['TIME'][0],hdu2['RATE'],yerr=hdu2['ERROR'],fmt='o',color='k',label='Source')
+                # ax[1].errorbar(hdu2['TIME']-hdu2['TIME'][0],hdu2['BACKV'],yerr=hdu2['BACKE'],fmt='o',color='g',label='Source-BKG')
+                ax[1].errorbar(hdu4['TIME']-hdu4['TIME'][0],hdu4['RATE'],yerr=hdu4['ERROR'],fmt='o',color='r',label='Background')
+                ax[1].set_xlabel('Time (s)')
+                ax[1].set_ylabel('Rate (cts/s)')
+                ax[1].set_title('RGS2',fontsize=18)
+                # ax[1].legend()
+                fig.suptitle(f"Light curve RGS order{order}",fontsize=20)
+                fig.tight_layout()
+                fig.savefig(f"{self.plotdir}/{self.ID}_RGS_O{order}_lc.pdf")
+
+    
+    def gen_EPIC_spectra(self, src_name, **kwargs):
         """
 
         Generate the spectral files
 
         """
+        if os.getcwd() != self.workdir: os.chdir(self.workdir)
+        
         if 'withminSN=yes' in kwargs:
             grouping = kwargs.get("withminSN", 'withminSN=yes')
             min_group = kwargs.get("minSN", 'minSN=5')
@@ -724,7 +874,7 @@ class ObservationXMM:
             grouping = kwargs.get("withCounts", 'withCounts=yes')
             min_group = kwargs.get("mincounts", 'mincounts=25')
         oversample = kwargs.get("oversample", 'oversample=3.0')
-        abscor = kwargs.get("abscor", True)
+        abscor = kwargs.get("abscor", False)
 
         print(f'<  INFO  > : Generating spectra')
 
@@ -740,6 +890,8 @@ class ObservationXMM:
                 pattern = 12
                 flag = "#XMMEA_EM "
             partnumber = 0
+            
+            # if several slices are defined, we split the spectrum in several parts
             for interval in self.slices:
                 if interval == "all":
                     timeslice = ""
@@ -756,13 +908,14 @@ class ObservationXMM:
                     portion = f"p{partnumber}"
 
                 low, up = self.energy_range
+                
                 for name_tag in ["src", "bkg"]:
                     # ---generate the spectrum
                     output_spectrum = f"{self.workdir}/{self.ID}_{src_name}{instr}_spectrum_{name_tag}_{low/1000}-{up/1000}_{portion}.fits"
-                    if instr == "EPN":
-                        flag = "(FLAG==0) "
-                    elif instr == "EMOS1" or instr == "EMOS2":
-                        flag = "#XMMEA_EM "
+                    # if instr == "EPN":
+                    #     flag = "(FLAG==0) "
+                    # elif instr == "EMOS1" or instr == "EMOS2":
+                    #     flag = "#XMMEA_EM "
                     expression = f"{flag} && (PATTERN <={pattern}) && ((X,Y) IN {self.regions[instr][name_tag]})"+timeslice
                     
                     inargs = [f'table={self.obs_files[instr]["clean_evts"]}',
@@ -794,7 +947,7 @@ class ObservationXMM:
                 bkg_spectrum = f"{self.ID}_{src_name}{instr}_spectrum_bkg_{low/1000}-{up/1000}_{portion}.fits"
                 
                 # ----generate the redistribution matrix
-                output_rmf = f"{self.workdir}/{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.rmf"
+                output_rmf = f"{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.rmf"
                 if glob.glob(output_rmf) == []:
                     print( f'<  INFO  > : Running rmfgen to generate the response matrix {low/1000}-{up/1000} keV')
                     inargs = [f'spectrumset={src_spectrum}', 
@@ -804,7 +957,7 @@ class ObservationXMM:
                         with contextlib.redirect_stdout(f):
                             w("rmfgen", inargs).run()
                 # ----generate the ancillary file
-                output_arf = f"{self.workdir}/{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.arf"
+                output_arf = f"{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.arf"
                 if glob.glob(output_arf) == []:
                     print(f'<  INFO  > : Running arfgen to generate the ancillary file {low/1000}-{up/1000} keV') 
                     inargs = [f'spectrumset={src_spectrum}', 
@@ -825,10 +978,9 @@ class ObservationXMM:
                 arf_name = f"{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.arf"
 
                 if glob.glob(grouped_spectrum) == []:
+
                     print(f'<  INFO  > : Running specgroup to group the spectral files {low/1000}-{up/1000} keV')
                     inargs = [f'spectrumset={src_spectrum}', 
-                              f'setbad=0:{low/1000},{up/1000}:26.0', 
-                              'units=KEV', 
                               oversample,
                               'withoversampling=yes', 
                               grouping,
@@ -844,4 +996,3 @@ class ObservationXMM:
                     with open(f"{self.logdir}/{src_name}{instr}_{low/1000}-{up/1000}_{portion}_specgroup.log", "w+") as f:
                         with contextlib.redirect_stdout(f):
                             w("specgroup", inargs).run()
-
