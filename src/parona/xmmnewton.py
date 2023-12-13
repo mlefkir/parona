@@ -10,11 +10,11 @@ from astropy.table import Table
 import contextlib
 import shutil
 from .callds9 import start_ds9
-
+from .xmm_lc import get_lightcurve
 
 class ObservationXMM:
     """
-    Class for processing an XMM-Newton observation
+    Processing an XMM-Newton observation
 
     The folder tree is this one
 
@@ -23,10 +23,21 @@ class ObservationXMM:
     path/obsid_workdir
     path/obsid_workdir/logs
     path/obsid_workdir/plots
+    
+    Parameters
+    ----------
+    path : str
+        Path to the folder where the repertories will be created
+    obsidentifier : str
+        Observation ID
+        
+    
 
     """
 
-    def __init__(self, path, obsidentifier, **kwargs):
+    def __init__(self, path, obsidentifier, slices=['all'], nslices=0, 
+                 instruments=["EPN", "EMOS1", "EMOS2"],
+                 energybands=[[200, 3000], [3000, 12000]]):
         
         self.ID = obsidentifier
         print(f"<  INFO  > : Observation ID: {self.ID}")
@@ -34,12 +45,11 @@ class ObservationXMM:
         query = XMMNewton.query_xsa_tap(f"select * from v_public_observations where observation_id='{obsidentifier}' ")
         query2 = XMMNewton.query_xsa_tap(f"select * from v_exposure where observation_id='{obsidentifier}' ")
 
-
         self.date = query['start_utc'][0][:10]
-        self.slices = kwargs.get('slices', ["all"])
-        self.nslices = kwargs.get('nslices', 0)
+        self.slices = slices
+        self.nslices = nslices
         
-        self.instruments = kwargs.get('instruments',["EPN", "EMOS1", "EMOS2"])
+        self.instruments = instruments
         if isinstance(self.instruments, str):
             self.instruments = [self.instruments]
         self.instruments_mode = []
@@ -54,7 +64,7 @@ class ObservationXMM:
             self.obs_files[instr] = {}
             self.regions[instr] = {}
 
-        self.energybands = kwargs.get("energybands",[[200, 3000], [3000, 12000]])
+        self.energybands = energybands
         self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
             np.array(self.energybands).flatten())]
         print(f"\t<  INFO  > : Energy range: {self.energy_range}")
@@ -108,9 +118,8 @@ class ObservationXMM:
         self.logdir = f'{path}/{self.ID}_workdir/logs/'
         self.plotdir = f'{path}/{self.ID}_workdir/plots/'
         os.environ["SAS_WORKDIR"] = self.workdir
-
  
-    def gen_evts(self, with_emproc=True, with_RGS=False, with_OM=False):
+    def gen_evts(self, with_MOS=True, with_RGS=False, with_OM=False):
         """
         Generate the event list the EPIC pn and MOS CCD
 
@@ -118,7 +127,7 @@ class ObservationXMM:
         
         Parameters
         ----------
-        with_emproc : bool, optional
+        with_MOS : bool, optional
             If True, will run emproc to generate the event list for the EPIC MOS CCDs, by default True
         with_RGS : bool, optional
             If True, will run rgsproc to generate the event list for the RGS, by default False
@@ -132,7 +141,7 @@ class ObservationXMM:
             with open(f"{self.logdir}/epproc.log", "w+") as f:
                 with contextlib.redirect_stdout(f):
                     w("epproc", []).run()
-        if with_emproc:
+        if with_MOS:
             if glob.glob(f"{self.workdir}/*MOS*ImagingEvts*") == [] and ("EMOS1" in self.instruments or "EMOS2" in self.instruments):
                 print(f'<  INFO  > : Running emproc to generate events list for the EPIC-MOS 1 & 2')
                 with open(f"{self.logdir}/emproc.log", "w+") as f:
@@ -334,7 +343,7 @@ class ObservationXMM:
                     with contextlib.redirect_stdout(f):
                         w("evselect", inargs).run()
 
-    def select_regions(self, src_name):
+    def select_regions(self, src_name,show_regions=False):
         """
 
         Select the source and background regions with ds9
@@ -344,18 +353,21 @@ class ObservationXMM:
 
         for instr in self.instruments:
             print(f'\t<  INFO  > : Processing instrument : {instr}')
-            try:
-                python_ds9.set("regions select all")
-            except:
-                python_ds9 = start_ds9()
-
-            python_ds9.set("regions select all")
-            python_ds9.set("regions delete")
-            python_ds9.set("file "+self.obs_files[instr]["image"])
-            python_ds9.set("scale log")
-            python_ds9.set("cmap b")
             self.obs_files[instr]["positions"] = f"{self.workdir}/{self.ID}_{src_name}{instr}_positions.txt"
             if glob.glob(self.obs_files[instr]["positions"]) == []:
+
+                
+                try:
+                    python_ds9.set("regions select all")
+                except:
+                    python_ds9 = start_ds9()
+
+                python_ds9.set("regions select all")
+                python_ds9.set("regions delete")
+                python_ds9.set("file "+self.obs_files[instr]["evts"])
+                python_ds9.set("bin to fit")
+                python_ds9.set("scale log")
+                python_ds9.set("cmap b")
                 print("Draw FIRST the region for the source and THEN the background")
                 input("Press Enter to continue...")
                 python_ds9.set("regions edit yes")
@@ -367,15 +379,32 @@ class ObservationXMM:
                     "regions").split("\n")[1]
                 np.savetxt(self.obs_files[instr]["positions"], np.array(
                     [self.regions[instr]["src"], self.regions[instr]["bkg"]]), fmt="%s")
+            
             else:
-                self.regions[instr]["src"], self.regions[instr]["bkg"] = np.genfromtxt(
-                    self.obs_files[instr]["positions"], dtype='str')
+                self.regions[instr]["src"], self.regions[instr]["bkg"] = np.genfromtxt(self.obs_files[instr]["positions"], dtype='str')
+            if show_regions:
+                try:
+                    python_ds9.set("regions select all")
+                except:
+                    python_ds9 = start_ds9()
+
+                python_ds9.set("regions select all")
+                python_ds9.set("regions delete")
+                python_ds9.set("file "+self.obs_files[instr]["evts"])
+                python_ds9.set("bin to fit")
+                python_ds9.set("scale log")
+                python_ds9.set("cmap b")
+                print("Draw FIRST the region for the source and THEN the background")
+                input("Press Enter to continue...")
+                python_ds9.set("regions edit yes")
+                python_ds9.set("regions format ciao")
+                python_ds9.set("regions system physical")
                 python_ds9.set(
                     f'regions load {self.obs_files[instr]["positions"]}')
                 python_ds9.set("regions edit yes")
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
-            python_ds9.set("zoom to fit")
+                python_ds9.set("zoom to fit")
             #python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
     def check_pileup(self, src_name):
@@ -507,8 +536,6 @@ class ObservationXMM:
 
         self.plot_lightcurves(src_name, tag)
 
-    
-
     def plot_lightcurves(self, src_name, tag):
 
         list_energies = []
@@ -621,8 +648,128 @@ class ObservationXMM:
             backscale.append(fits.open(output_spectrum)[1].header["BACKSCAL"])
             print(fits.open(output_spectrum)[1].header["BACKSCAL"])   
         return backscale[0]/backscale[1]   
+    
+    def get_scale_value(self, src_name,src_event_file, bkg_event_file):
+        
+        backscale = []
+        instr = fits.open(src_event_file)['PRIMARY'].header['INSTRUME']
+        instr_bkg = fits.open(bkg_event_file)['PRIMARY'].header['INSTRUME']
+        assert instr == instr_bkg, "The source and background event files are not from the same instrument"
+        print(f"\t<  INFO  > : Generating spectra to get backscale value for {instr}")
         
         
+        if instr == "EPN":
+            specchanmax = 20479
+            pattern = 4
+            flag = "(FLAG==0) "
+        else:
+            specchanmax = 11999
+            pattern = 12
+            flag = "#XMMEA_EM "
+            
+        for (event_file,name_tag) in zip([src_event_file,bkg_event_file],["src", "bkg"]):
+            # ---generate the spectrum
+            output_spectrum = f"{self.workdir}/{self.ID}_{src_name}{instr}_spectrum_{name_tag}_BACKSCALE.fits"
+            if instr == "EPN":
+                flag = "(FLAG==0) "
+            elif instr == "EMOS1" or instr == "EMOS2":
+                flag = "#XMMEA_EM "
+            expression = f"{flag} && (PATTERN <={pattern})"
+            
+            inargs = [f'table={event_file}',
+                        'withspectrumset=yes',
+                        f'spectrumset={output_spectrum}',
+                        'energycolumn=PI', 
+                        'spectralbinsize=5',
+                        'withspecranges=yes', 
+                        'specchannelmin=0',
+                        f'specchannelmax={specchanmax}', 
+                        f'expression={expression}']
+            
+            if glob.glob(output_spectrum) == []:
+                print(f'<  INFO  > : Generate {name_tag} spectrum for BACKSCALE')
+                with open(f"{self.logdir}/{src_name}{instr}_{name_tag}_spectrum_BACKSCALE.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("evselect", inargs).run()
+                # run backscale
+                inargs = [f'spectrumset={output_spectrum}']
+                with open(f"{self.logdir}/{src_name}{instr}_{name_tag}_backscale_BACKSCALE.log", "w+") as f:
+                    with contextlib.redirect_stdout(f):
+                        w("backscale", inargs).run()
+            backscale.append(fits.open(output_spectrum)[1].header["BACKSCAL"])
+            # print(fits.open(output_spectrum)[1].header["BACKSCAL"])   
+        return backscale[0]/backscale[1]   
+        
+    def gen_lightcurves_manual(self, src_name,binning,user_defined_bti=None,verbose=False, min_Frac_EXP=0.3,
+                      CCDNR=4,PATTERN=4,PI=[200,10000],
+                      t_clip_start=10,t_clip_end=100,):
+        src_name += '_'
+        print(f'\t<  INFO  > : Generating light-curves manually')
+        for instr in self.instruments:
+            print(f'\t<  INFO  > : Processing instrument : {instr}')
+            event_file = self.obs_files[instr]["evts"] 
+
+            event_file_filtered = f'{instr}_barely_filtered.fits'
+            
+            if instr == 'EPN':
+                expression = '#XMMEA_EP && FLAG == 0'
+            else:
+                raise NotImplementedError('Only EPN implemented')
+                expression = '#XMMEA_EM && FLAG == 0'
+            
+            # generate a barely filtered event file 
+            inargs = [f'table={event_file}', 
+            'withfilteredset=Y', 
+            f'filteredset={event_file_filtered}',
+            f'expression={expression}']
+            if glob.glob(event_file_filtered) == []:
+                w("evselect", inargs).run()
+                        
+            # generate the source and background event files
+            src_event_file = f'{src_name}{instr}_evts_src.fits'
+            bkg_event_file = f'{src_name}{instr}_evts_bkg.fits'
+            output = [src_event_file,bkg_event_file]
+            regions = [self.regions[instr]['src'],self.regions[instr]['bkg']]
+            
+            for i,reg in enumerate(regions):
+                inargs = [f'table={event_file_filtered}', 
+                       'withfilteredset=Y', 
+                       f'filteredset={output[i]}',
+                       f'expression=((X,Y) in  {reg})']
+                if glob.glob(output[i]) == []:
+                    w("evselect", inargs).run()
+            # get the backscale value
+            scale = self.get_scale_value(src_name,src_event_file, bkg_event_file)
+
+            if type(PI[0]) ==int:
+                energies = [PI]
+            else:
+                energies = PI
+                
+            for PI in energies:
+                print(f'\t<  INFO  > : Processing energy range : {PI[0]/1000}-{PI[1]/1000} keV')
+                
+                t, net,err,bg,bg_err,t_bin,clean_Frac_EXP,T0 = get_lightcurve(src_event_file,bkg_event_file,scale,user_defined_bti=user_defined_bti
+                        ,verbose=verbose, min_Frac_EXP=min_Frac_EXP,
+                        CCDNR=CCDNR,input_timebin_size=binning,PATTERN=PATTERN,PI=PI,
+                        t_clip_start=t_clip_start,t_clip_end=t_clip_end)
+                
+                # save the lightcurve
+                # arr = np.array([t, net,err,bg,bg_err,Frac_EXP],dtype=float).T
+                arr = np.array([t, net,err,bg,bg_err],dtype=float).T
+                frac = np.array([t_bin[:-1],clean_Frac_EXP],dtype=float).T
+                np.savetxt(f'{src_name}{instr}_{self.ID}_lc_{PI[0]/1000}-{PI[1]/1000}.txt',arr,header=f'T0 (TT): {T0}'+'\n T'+'\ntime net err bg bg_err')
+                np.savetxt(f'{src_name}{instr}_{self.ID}_{PI[0]/1000}-{PI[1]/1000}_frac.txt',frac,header=f'T0: {T0}'+'\ntime clean_Frac_EXP')
+        
+                fig,ax = plt.subplots(figsize=(15,5))
+                ax.set_xlabel('Time (s)')
+                ax.set_ylabel('Rate (cts/s)')
+                ax.errorbar(t,net,yerr=err,color='k',label='Source',fmt='o',ms=2,mfc='w')
+                ax.errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=2,mfc='w')
+                # ax[1].errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=3,mfc='w')
+                ax.legend()
+                fig.savefig(f'lightcurve_{PI[0]/1000}-{PI[1]/1000}.png',dpi=300,bbox_inches='tight')
+    
     def correct_GTI_timeseries(self,time_src,start_GTI,stop_GTI,dt):
 
         maxi = len(time_src)-1
@@ -782,8 +929,7 @@ class ObservationXMM:
                 with open(f"{self.logdir}/{instr}_rgsimplot.log", "w+") as f:
                     with contextlib.redirect_stdout(f):
                         w("rgsimplot", inargs).run()
-           
-           
+               
     def RGS_background_lightcurve(self,bin_size=100):
         """      evselect table=PxxxxxxyyyyRrzeeeEVENLI0000.FIT timebinsize=100 \
      rateset=my_rgs1_background_lc.fit \
@@ -824,7 +970,6 @@ class ObservationXMM:
             fig.tight_layout()
             fig.savefig(f"{self.plotdir}/{self.ID}_RGS_background_lc.pdf")
 
-
     def RGS_plot_lightcurve(self):
         print(' INFO  : Generate lightcurves for RGS')
         for order in [1,2]:
@@ -858,7 +1003,6 @@ class ObservationXMM:
                 fig.tight_layout()
                 fig.savefig(f"{self.plotdir}/{self.ID}_RGS_O{order}_lc.pdf")
 
-    
     def gen_EPIC_spectra(self, src_name, **kwargs):
         """
 
