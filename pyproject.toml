@@ -12,7 +12,7 @@ readme = "README.md"
 requires-python = ">=3.6"
 dependencies = [
     "numpy",
-    "scipy","matplotlib","astropy","pyds9"
+    "scipy","matplotlib","astropy","pyds9","swifttools"
     ]
 version = "0.1.0"
 
