@@ -456,16 +456,17 @@ class ObservationXMM:
         """
         print(f"<  INFO  > : Selection of source and background regions with ds9")
 
-        for instr in self.instruments:
+        for i,instr in enumerate(self.instruments):
             print(f"\t<  INFO  > : Processing instrument : {instr}")
             self.obs_files[instr][
                 "positions"
             ] = f"{self.workdir}/{self.ID}_{src_name}{instr}_positions.txt"
-            if glob.glob(self.obs_files[instr]["positions"]) == []:
-                try:
-                    python_ds9.set("regions select all")
-                except:
-                    python_ds9 = start_ds9()
+            if glob.glob(self.obs_files[instr]["positions"]) == []:                
+                if i == 0:
+                    try:
+                        python_ds9.set("regions select all")
+                    except:
+                        python_ds9 = start_ds9()
 
                 python_ds9.set("regions select all")
                 python_ds9.set("regions delete")
@@ -480,21 +481,26 @@ class ObservationXMM:
                 python_ds9.set("regions system physical")
                 self.regions[instr]["src"] = python_ds9.get("regions").split("\n")[0]
                 self.regions[instr]["bkg"] = python_ds9.get("regions").split("\n")[1]
+                
                 np.savetxt(
                     self.obs_files[instr]["positions"],
                     np.array([self.regions[instr]["src"], self.regions[instr]["bkg"]]),
                     fmt="%s",
                 )
+                python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+
 
             else:
+                print(f"\t<  INFO  > : Reading regions from {self.obs_files[instr]['positions']}")
                 self.regions[instr]["src"], self.regions[instr]["bkg"] = np.genfromtxt(
                     self.obs_files[instr]["positions"], dtype="str"
                 )
             if show_regions:
-                try:
-                    python_ds9.set("regions select all")
-                except:
-                    python_ds9 = start_ds9()
+                if i == 0:
+                    try:
+                        python_ds9.set("regions select all")
+                    except:
+                        python_ds9 = start_ds9()
 
                 python_ds9.set("regions select all")
                 python_ds9.set("regions delete")
@@ -502,8 +508,6 @@ class ObservationXMM:
                 python_ds9.set("bin to fit")
                 python_ds9.set("scale log")
                 python_ds9.set("cmap b")
-                print("Draw FIRST the region for the source and THEN the background")
-                input("Press Enter to continue...")
                 python_ds9.set("regions edit yes")
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
@@ -512,7 +516,7 @@ class ObservationXMM:
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
                 python_ds9.set("zoom to fit")
-            # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+                # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
     def check_pileup(self, src_name):
         """
