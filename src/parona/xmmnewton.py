@@ -17,7 +17,7 @@ class ObservationXMM:
     """
     Processing an XMM-Newton observation
 
-    The folder tree is this one
+    The directories created are:
 
     path/odf
     path/data/obsid_datadir
@@ -25,24 +25,37 @@ class ObservationXMM:
     path/obsid_workdir/logs
     path/obsid_workdir/plots
 
+
     Parameters
     ----------
     path : str
         Path to the folder where the repertories will be created
     obsidentifier : str
         Observation ID
-
-
+    slices : list, optional
+        List of slices to process, by default ['all'], in case we want reduce
+        spectra for specific segments of the observation
+    nslices : int, optional
+        Number of slices to process, by default 0, in case we want reduce
+        spectra for specific segments of the observation
+    instruments : list, optional
+        List of instruments to process, by default ["EPN", "EMOS1", "EMOS2"]
+    energybands : list, optional
+        List of energy bands to process, by default [[200, 3000], [3000, 12000]]
+        2keV-3keV and 3keV-12keV
+    replot : bool, optional
+        Replot the light curves, by default True
+    
 
     """
-
+    
     def __init__(
         self,
         path,
         obsidentifier,
         slices=["all"],
         instruments=["EPN", "EMOS1", "EMOS2"],
-        energybands=[[200, 3000], [3000, 12000]],
+        energybands=[[200, 3000], [3000, 12000]],replot=True,
     ):
         """
 
@@ -90,13 +103,14 @@ class ObservationXMM:
             self.instruments = [self.instruments]
         self.instruments_mode = []
         filt_sci = query2["is_scientific"]
+
         for instr in self.instruments:
             self.instruments_mode.append(
-                query2["mode_friendly_name"][filt_sci][
-                    query2["instrument"][filt_sci] == "EPN"
-                ][0]
-            )
-
+                query2["mode_friendly_name"][filt_sci][query2["instrument"][filt_sci] == instr][0])
+        modes = dict(zip(self.instruments, self.instruments_mode))
+        
+        print(f"<  INFO  > : Scientific modes: {modes}")
+        
         self.obs_files = {}
         self.regions = {}
 
@@ -109,10 +123,10 @@ class ObservationXMM:
             np.min(np.array(self.energybands).flatten()),
             np.max(np.array(self.energybands).flatten()),
         ]
-        print(f"\t<  INFO  > : Energy range: {self.energy_range}")
+        print(f"<  INFO  > : Energy range: {self.energy_range}")
         self.check_repertories(path)
 
-        self.replot = True
+        self.replot = replot
         # execute startsas which is is a wrapper for the SAS command line tools
         # cifbuild and odfingest, will set SAS_CCF and SAS_ODF environment variables
         # if already set then execute again but with different arguments
@@ -155,11 +169,11 @@ class ObservationXMM:
         """
 
         if not os.path.isdir(f"{path}/{self.ID}_workdir"):
-            os.mkdir(f"{path}/{self.ID}_workdir")
+            os.makedirs(f"{path}/{self.ID}_workdir")
         if not os.path.isdir(f"{path}/{self.ID}_workdir/logs"):
-            os.mkdir(f"{path}/{self.ID}_workdir/logs")
+            os.makedirs(f"{path}/{self.ID}_workdir/logs")
         if not os.path.isdir(f"{path}/{self.ID}_workdir/plots"):
-            os.mkdir(f"{path}/{self.ID}_workdir/plots")
+            os.makedirs(f"{path}/{self.ID}_workdir/plots")
 
         self.workdir = f"{path}/{self.ID}_workdir/"
         self.logdir = f"{path}/{self.ID}_workdir/logs/"
@@ -193,7 +207,7 @@ class ObservationXMM:
             with open(f"{self.logdir}/epproc.log", "w+") as f:
                 with contextlib.redirect_stdout(f):
                     w("epproc", []).run()
-        if with_MOS:
+        if with_MOS and ("EMOS1" in self.instruments or "EMOS2" in self.instruments ):
             if glob.glob(f"{self.workdir}/*MOS*ImagingEvts*") == [] and (
                 "EMOS1" in self.instruments or "EMOS2" in self.instruments
             ):
@@ -203,7 +217,7 @@ class ObservationXMM:
                 with open(f"{self.logdir}/emproc.log", "w+") as f:
                     with contextlib.redirect_stdout(f):
                         w("emproc", []).run()
-        if with_RGS:
+        if with_RGS and ("R1" in self.instruments or "R2" in self.instruments):
             with open(f"{self.logdir}/rgsproc.log", "w+") as f:
                 print(
                     f"<  INFO  > : Running rgsproc to generate events list for the RGS 1 & 2"
@@ -211,7 +225,7 @@ class ObservationXMM:
                 with contextlib.redirect_stdout(f):
                     w("rgsproc", []).run()
 
-        if with_OM:
+        if with_OM and ("OM" in self.instruments):
             with open(f"{self.logdir}/omichain.log", "w+") as f:
                 print(
                     f"<  INFO  > : Running omichain to generate events list for the OM"
@@ -243,6 +257,7 @@ class ObservationXMM:
                     if os.path.getsize(res) > size:
                         size = os.path.getsize(res)
                         input_eventfile = buff[i]
+                        break
             self.obs_files[instr]["evts"] = input_eventfile
 
     def find_eventfile(self, instr):
@@ -251,6 +266,11 @@ class ObservationXMM:
 
         If there is only one event list file in the workdir, it will return it.
         Else, it will return the biggest file in the workdir.
+        
+        Parameters
+        ----------
+        instr : str
+            Instrument name, e.g. "EPN", "EMOS1", "EMOS2"
         """
         buff = glob.glob(f"{self.workdir}/*{instr}_*ImagingEvts*")
         size = 0
