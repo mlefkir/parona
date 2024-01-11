@@ -1,7 +1,5 @@
 import os
 import sys
-import glob
-import requests
 from shutil import copytree
 import warnings
 
@@ -12,6 +10,7 @@ from astropy.io import fits, ascii
 from astropy.wcs import WCS
 from astropy.time import Time
 from astroquery.simbad import Simbad
+from regions import CirclePixelRegion, CircleSkyRegion
 
 
 # heasoft
@@ -24,6 +23,8 @@ warnings.filterwarnings(
     ".*Unknown element mirrorURL.*",
     vo.utils.xml.elements.UnknownElementWarning,
 )
+
+uvotsource = hsp.HSPTask("uvotsource")
 
 
 class UVOTSwift:
@@ -210,9 +211,97 @@ class UVOTSwift:
                 print(f"<  INFO  > : No image found for {obsid}")
                 no_image.append(obsid)
             else:
-                copytree(original_dir, dest)
+                if not os.path.exists(dest):
+                    copytree(original_dir, dest)
         print(f"<  INFO  > : Done copying files to temporary directory")
         if len(no_image) > 0:
             warnings.warn(f"{len(no_image)} observations have no images")
             for obsid in no_image:
                 print(f"{obsid}")
+
+    def plot_image(self, image):
+        """Plot the image of a given observation index and filter"""
+
+        if self.on_sciserver:
+            self.imviz = Imviz()
+            self.viewer = self.imviz.default_viewer
+            self.imviz.load_data(image)
+            self.imviz.show()
+            # customize the viewer
+            plot_options = self.imviz.plugins["Plot Options"]
+            plot_options.select_all()
+
+            # Preset
+            plot_options.stretch_preset = "Min/Max"
+
+            self.viewer.set_colormap("Gray")
+            self.viewer.stretch = "log"
+            self.viewer.zoom_level = 1
+
+        else:
+            raise NotImplementedError("Plotting only on SciServer for now")
+
+    def set_regions(self, ra_bkg, dec_bkg, radius_bkg=30.0 * u.arcsec):
+        """Set the source and background regions for the photometry
+
+        Parameters
+        ----------
+        ra_bkg : float
+            Right ascension of the background region, in degrees
+        dec_bkg : float
+            Declination of the background region, in degrees
+        radius_bkg : float
+            Radius of the background region
+        """
+        ra_bkg = ra_bkg * u.deg
+        dec_bkg = dec_bkg * u.deg
+
+        src_reg = CircleSkyRegion(center=self.coord, radius=5 * u.arcsecond)
+        bkg_coords = coord.SkyCoord(
+            ra=ra_bkg, dec=dec_bkg, unit=(u.deg, u.deg), frame="icrs"
+        )
+
+        bkg_reg = CircleSkyRegion(center=bkg_coords, radius=radius_bkg)
+        print("< INFO  > : Setting source and background regions")
+        self.imviz.load_regions([src_reg, bkg_reg])
+
+        obsid = self.observations["obsid"][i]
+        path = f"{self.working_dir}/images/{obsid}"
+
+        regions = imviz.get_interactive_regions()
+        print(f"<  INFO  > : Saving regions to {self.working_dir}")
+        labels = ["src", "bkg"]
+        for filt in self.filters:
+            for i, subset in enumerate(range(1, 3)):
+                rad = str(regions[f"Subset {subset}"].to_sky(w).radius).replace(
+                    " arcsec", '"'
+                )
+                with open(f"{labels[i]}_{filt}.txt", "w") as fl:
+                    fl.write(
+                        f'fk5;circle({np.float64(regions[f"Subset {subset}"].to_sky(w).center.ra)},{np.float64(regions[f"Subset {subset}"].to_sky(w).center.dec)},{rad})'
+                    )
+
+    def get_flux(self):
+        path = f"{self.working_dir}/images/"
+        obsid = self.observations["obsid"][i]
+
+        for filt in self.filters:
+            image = f"sw{obsid}u{filt}_sk.img.gz"
+
+            res = uvotsource(
+                image=f"{self.working_dir}/{image}",
+                srcreg=f"{path}/src_{filt}.txt",
+                bkgreg=f"{path}/bkg_{filt}.txt",
+                outfile=f"{self.working_dir}/fluxes/{obsid}_{filt}.fits",
+                sigma=3.0,
+                skipreason="",
+                chatter=0,
+                clobber="true",
+            )
+            if not res.returncode == 0:
+                print(f"<  INFO  > : Error in {image}")
+                print(res.stderr)
+                print(res.stdout)
+                with open(f"{self.working_dir}/fluxes/{obsid}_{filt}.log", "w") as f:
+                    f.write(res.stderr)
+                    f.write(res.stdout)
