@@ -25,6 +25,12 @@ warnings.filterwarnings(
 )
 uvotsource = hsp.HSPTask("uvotsource")
 
+def region_radius_to_arcsec(s):
+    """Converts the radius of a ds9 region to arcsec"""
+    radius_str = re.findall(r"\d+\.\d+|\d+", s)[-1]
+    radius = float(radius_str) * u.deg
+    radius_str_arcsec = str(radius.to(u.arcsec)).replace(" arcsec", '"')
+    return s.replace(radius_str, radius_str_arcsec)
 
 class UVOTSwift:
     """To build a long-term light curve of a source using UVOT data from the Swift archive.
@@ -44,14 +50,13 @@ class UVOTSwift:
         self,
         source_name: str,
         filters=["w1", "w2", "m2", "bb", "uu", "vv"],
-        on_sciserver=True,
-        username="",
+        on_sciserver=True,username="",
     ):
         self.source_name = source_name
         self.filters = filters
         self.on_sciserver = on_sciserver
         self.temp_path = f"/home/idies/workspace/Temporary/{username}/scratch/"
-        self.obsids = dict(zip(self.filters, [[] for i in range(len(self.filters))]))
+        self.obsids = dict(zip(self.filters,[[] for i in range(len(self.filters))]))
         self._make_dirs()
         if not self.on_sciserver:
             raise NotImplementedError("Running on SciServer only for now")
@@ -85,19 +90,19 @@ class UVOTSwift:
         images = [f"sw{obsid}u{filt}_sk.img.gz" for filt in self.filters]
         # check if the images exist
         located = []
-        for i, image in enumerate(images):
+        for i,image in enumerate(images):
             if os.path.exists(f"{self.working_dir}/images/{obsid}/{image}"):
                 self.obsids[self.filters[i]].append(obsid)
                 located.append(f"{self.working_dir}/images/{obsid}/{image}")
         return located
-
+    
     def check_all_images(self):
         """Check if all the images are located"""
         for i in range(self.n_obs):
             self._get_image_by_index(i)
         self.nimages = [len(self.obsids[filt]) for filt in self.obsids.keys()]
         print(f"<  INFO  > : Number of images {self.nimages}")
-
+        
     def _make_dirs(self, path=""):
         """Make directories to store the files
 
@@ -145,10 +150,7 @@ class UVOTSwift:
             """
         results = self.tap_services[0].search(query).to_table()
         ascii.write(
-            results,
-            f"{self.working_dir}{self.source_name}_allobs.txt",
-            format="basic",
-            overwrite=True,
+            results, f"{self.working_dir}{self.source_name}_allobs.txt", format="basic",overwrite=True
         )
         return results
 
@@ -192,17 +194,17 @@ class UVOTSwift:
                 )
         for c in heasarc_tables["swiftmastr"].columns:
             print("{:20s} {}".format(c.name, c.description))
-
-    def copy_files_in_temp(self, n=None):
+            
+    def copy_files_in_temp(self,n=None):
         """Copy the files in the temporary directory of SciServer"""
         # copy the files to the temporary directory
-        if n == None:
+        if n ==None:
             n = self.n_obs
-
+            
         print(f"<  INFO  > : Copying files to temporary directory")
         no_image = []
         for i in range(n):
-            print(f"<  INFO  > : Copying files for obs {i+1}/{self.n_obs}", end="\r")
+            print(f"<  INFO  > : Copying files for obs {i+1}/{self.n_obs}",end="\r")
             sys.stdout.flush()
             obsid = self.observations["obsid"][i]
             original_dir = f"{self.obs_dirs[i]}/uvot/image"
@@ -219,10 +221,10 @@ class UVOTSwift:
             warnings.warn(f"{len(no_image)} observations have no images")
             for obsid in no_image:
                 print(f"{obsid}")
-
+                
         print(f"<  INFO  > : Check all images")
         self.check_all_images()
-
+                
     def plot_image(self, image):
         """Plot the image of a given observation index and filter"""
 
@@ -240,77 +242,90 @@ class UVOTSwift:
             self.viewer.set_colormap("Gray")
             self.viewer.stretch = "log"
             self.viewer.zoom_level = 1
-
+            
         else:
             raise NotImplementedError("Plotting only on SciServer for now")
 
-    def set_regions(self, image_path):
+    def set_regions(self,image_path):
         """Set the source and background regions for the photometry
 
         Parameters
         ----------
         image_path
-
+        
         """
         # get the WCS
-        f = fits.open(f"{image_path}")  #
+        f = fits.open(f"{image_path}")#
         w = WCS(f[1].header)
 
         print("< INFO  > : Setting source and background regions")
-
+        
         # read regions from Imviz
         region_obs = self.imviz.get_interactive_regions()
 
         ign_str = ["#", "j2000"]
-        labels = ["src", "bkg"]
+        labels = ["src","bkg"]
 
-        for i in range(1, 3):
-            lab = labels[i - 1]
+        for i in range(1,3):
+            lab = labels[i-1]
             if not os.path.isfile(f"{self.working_dir}/{lab}.reg"):
                 print(f"<  INFO  > : Saving regions files to {self.working_dir}")
 
                 pre_reg = f"{self.working_dir}/pre_{lab}.reg"
                 # save the regions
-                (region_obs[f"Subset {i}"].to_sky(w)).write(
-                    pre_reg, format="ds9", overwrite=True
-                )
+                (region_obs[f"Subset {i}"].to_sky(w)).write(pre_reg,format="ds9",overwrite=True)
 
-                # open the region file
-                with open(pre_reg, "r") as f:
+                # open the region file 
+                with open(pre_reg,"r") as f:
                     for l in f:
                         # for ig in ign_str:
                         if not ("#" in l or "j2000" in l):
-                            keep = l
+                            keep = region_radius_to_arcsec(l)
                 # save the right region
-                with open(f"{self.working_dir}/{lab}.reg", "w") as f:
+                with open(f"{self.working_dir}/{lab}.reg","w") as f:
                     f.write(f"fk5;{keep}")
             else:
                 print(f"<  INFO  > : Loading regions files to {self.working_dir}")
-
-    def get_flux(self, i):
-        path = f"{self.working_dir}/images/uvot"
-        obsid = self.observations["obsid"][i]
-
-        for filt in self.filters[:2]:
+    def get_all_fluxes(self,filters="all"):
+        """Get the fluxes for all obsids in the given filters"""
+        
+        if filters=="all":
+            filters=self.filters
+        print(f"<  INFO  > : running uvotsource for all observations")
+            
+        for filt in filters:
+            print(f"<  INFO  > : Processing filter {filt}")
+            for i,obsid in enumerate(self.obsids[filt]):
+                print(f"<  INFO  > : Observation {i+1}/{len(self.obsids[filt])}",end="\r")
+                sys.stdout.flush()
+                self.get_flux(obsid,filt)
+                
+            
+        
+    def get_flux(self,obsid,filt):
+        """ Get the flux output file for a given obsid and filter"""
+        outfile = f"{self.working_dir}/fluxes/{obsid}_{filt}.fits"
+        if not os.path.isfile(outfile):
             image = f"sw{obsid}u{filt}_sk.img.gz"
-            if os.path.isfile(f"{self.working_dir}/images/{obsid}/{image}"):
-                print("is file")
+            expfile = f"{self.working_dir}/images/{obsid}/{image}"
+            expfile = expfile.replace("sk.","ex.")
             res = uvotsource(
                 image=f"{self.working_dir}/images/{obsid}/{image}",
                 srcreg=f"{self.working_dir}/src.reg",
                 bkgreg=f"{self.working_dir}/bkg.reg",
-                outfile=f"{self.working_dir}/fluxes/{obsid}_{filt}.fits",
+                outfile=outfile,
+                expfile=expfile,
                 sigma=3.0,
                 skipreason="",
                 chatter=0,
-                clobber="true",
+                clobber="false",
             )
+            with open(f"{self.working_dir}/fluxes/{obsid}_{filt}.log", "w") as f:
+                if res.stderr is not None:
+                    f.write(res.stderr)
+                if res.stdout is not None:                    
+                    f.write(res.stdout)
             if not res.returncode == 0:
                 print(f"<  INFO  > : Error in {image}")
                 print(res.stderr)
                 print(res.stdout)
-                with open(f"{self.working_dir}/fluxes/{obsid}_{filt}.log", "w") as f:
-                    if res.stderr is not None:
-                        f.write(res.stderr)
-                    if res.stdout is not None:
-                        f.write(res.stdout)
