@@ -10,12 +10,12 @@ from astropy.io import fits, ascii
 from astropy.wcs import WCS
 from astropy.time import Time
 from astroquery.simbad import Simbad
-from regions import CirclePixelRegion, CircleSkyRegion
-
+import regions
 
 # heasoft
 import heasoftpy as hsp
 import pyvo as vo
+from jdaviz import Imviz
 
 # Ignore unimportant warnings
 warnings.filterwarnings(
@@ -23,7 +23,6 @@ warnings.filterwarnings(
     ".*Unknown element mirrorURL.*",
     vo.utils.xml.elements.UnknownElementWarning,
 )
-
 uvotsource = hsp.HSPTask("uvotsource")
 
 
@@ -52,7 +51,7 @@ class UVOTSwift:
         self.filters = filters
         self.on_sciserver = on_sciserver
         self.temp_path = f"/home/idies/workspace/Temporary/{username}/scratch/"
-
+        self.obsids = dict(zip(self.filters, [[] for i in range(len(self.filters))]))
         self._make_dirs()
         if not self.on_sciserver:
             raise NotImplementedError("Running on SciServer only for now")
@@ -60,8 +59,7 @@ class UVOTSwift:
             # f"<  INFO  > : Not running on SciServer, lots of files will be downloaded to your local machine! Brace yourself!"
             # )
         else:
-            from jdaviz import Imviz
-
+            self.imviz = Imviz()
             warnings.warn(
                 f"<  INFO  > : Running on SciServer, files will be copied to your SciServer Temporary directory"
             )
@@ -84,21 +82,21 @@ class UVOTSwift:
     def _get_image_by_index(self, index):
         """Get the image of a given observation index"""
         obsid = self.observations["obsid"][index]
-        current_dir = f"{self.working_dir}/"
         images = [f"sw{obsid}u{filt}_sk.img.gz" for filt in self.filters]
         # check if the images exist
         located = []
-        for image in images:
-            if not os.path.exists(f"{self.working_dir}/images/{image}"):
-                warnings.warn(f"{image} not found in {self.working_dir}/images/{image}")
-            else:
-                located.append(f"{current_dir}/images/{image}")
+        for i, image in enumerate(images):
+            if os.path.exists(f"{self.working_dir}/images/{obsid}/{image}"):
+                self.obsids[self.filters[i]].append(obsid)
+                located.append(f"{self.working_dir}/images/{obsid}/{image}")
         return located
 
     def check_all_images(self):
         """Check if all the images are located"""
         for i in range(self.n_obs):
             self._get_image_by_index(i)
+        self.nimages = [len(self.obsids[filt]) for filt in self.obsids.keys()]
+        print(f"<  INFO  > : Number of images {self.nimages}")
 
     def _make_dirs(self, path=""):
         """Make directories to store the files
@@ -195,16 +193,19 @@ class UVOTSwift:
         for c in heasarc_tables["swiftmastr"].columns:
             print("{:20s} {}".format(c.name, c.description))
 
-    def copy_files_in_temp(self):
+    def copy_files_in_temp(self, n=None):
         """Copy the files in the temporary directory of SciServer"""
         # copy the files to the temporary directory
+        if n == None:
+            n = self.n_obs
+
         print(f"<  INFO  > : Copying files to temporary directory")
         no_image = []
-        for i in range(self.n_obs):
+        for i in range(n):
             print(f"<  INFO  > : Copying files for obs {i+1}/{self.n_obs}", end="\r")
             sys.stdout.flush()
             obsid = self.observations["obsid"][i]
-            original_dir = f"{self.obs_dirs[i]}/uvot/image/"
+            original_dir = f"{self.obs_dirs[i]}/uvot/image"
             dest = f"{self.working_dir}/images/{obsid}"
 
             if not os.path.exists(original_dir):
@@ -219,11 +220,13 @@ class UVOTSwift:
             for obsid in no_image:
                 print(f"{obsid}")
 
+        print(f"<  INFO  > : Check all images")
+        self.check_all_images()
+
     def plot_image(self, image):
         """Plot the image of a given observation index and filter"""
 
         if self.on_sciserver:
-            self.imviz = Imviz()
             self.viewer = self.imviz.default_viewer
             self.imviz.load_data(image)
             self.imviz.show()
@@ -241,57 +244,61 @@ class UVOTSwift:
         else:
             raise NotImplementedError("Plotting only on SciServer for now")
 
-    def set_regions(self, ra_bkg, dec_bkg, radius_bkg=30.0 * u.arcsec):
+    def set_regions(self, image_path):
         """Set the source and background regions for the photometry
 
         Parameters
         ----------
-        ra_bkg : float
-            Right ascension of the background region, in degrees
-        dec_bkg : float
-            Declination of the background region, in degrees
-        radius_bkg : float
-            Radius of the background region
+        image_path
+
         """
-        ra_bkg = ra_bkg * u.deg
-        dec_bkg = dec_bkg * u.deg
+        # get the WCS
+        f = fits.open(f"{image_path}")  #
+        w = WCS(f[1].header)
 
-        src_reg = CircleSkyRegion(center=self.coord, radius=5 * u.arcsecond)
-        bkg_coords = coord.SkyCoord(
-            ra=ra_bkg, dec=dec_bkg, unit=(u.deg, u.deg), frame="icrs"
-        )
-
-        bkg_reg = CircleSkyRegion(center=bkg_coords, radius=radius_bkg)
         print("< INFO  > : Setting source and background regions")
-        self.imviz.load_regions([src_reg, bkg_reg])
 
-        obsid = self.observations["obsid"][i]
-        path = f"{self.working_dir}/images/{obsid}"
+        # read regions from Imviz
+        region_obs = self.imviz.get_interactive_regions()
 
-        regions = imviz.get_interactive_regions()
-        print(f"<  INFO  > : Saving regions to {self.working_dir}")
+        ign_str = ["#", "j2000"]
         labels = ["src", "bkg"]
-        for filt in self.filters:
-            for i, subset in enumerate(range(1, 3)):
-                rad = str(regions[f"Subset {subset}"].to_sky(w).radius).replace(
-                    " arcsec", '"'
-                )
-                with open(f"{labels[i]}_{filt}.txt", "w") as fl:
-                    fl.write(
-                        f'fk5;circle({np.float64(regions[f"Subset {subset}"].to_sky(w).center.ra)},{np.float64(regions[f"Subset {subset}"].to_sky(w).center.dec)},{rad})'
-                    )
 
-    def get_flux(self):
-        path = f"{self.working_dir}/images/"
+        for i in range(1, 3):
+            lab = labels[i - 1]
+            if not os.path.isfile(f"{self.working_dir}/{lab}.reg"):
+                print(f"<  INFO  > : Saving regions files to {self.working_dir}")
+
+                pre_reg = f"{self.working_dir}/pre_{lab}.reg"
+                # save the regions
+                (region_obs[f"Subset {i}"].to_sky(w)).write(
+                    pre_reg, format="ds9", overwrite=True
+                )
+
+                # open the region file
+                with open(pre_reg, "r") as f:
+                    for l in f:
+                        # for ig in ign_str:
+                        if not ("#" in l or "j2000" in l):
+                            keep = l
+                # save the right region
+                with open(f"{self.working_dir}/{lab}.reg", "w") as f:
+                    f.write(f"fk5;{keep}")
+            else:
+                print(f"<  INFO  > : Loading regions files to {self.working_dir}")
+
+    def get_flux(self, i):
+        path = f"{self.working_dir}/images/uvot"
         obsid = self.observations["obsid"][i]
 
-        for filt in self.filters:
+        for filt in self.filters[:2]:
             image = f"sw{obsid}u{filt}_sk.img.gz"
-
+            if os.path.isfile(f"{self.working_dir}/images/{obsid}/{image}"):
+                print("is file")
             res = uvotsource(
-                image=f"{self.working_dir}/{image}",
-                srcreg=f"{path}/src_{filt}.txt",
-                bkgreg=f"{path}/bkg_{filt}.txt",
+                image=f"{self.working_dir}/images/{obsid}/{image}",
+                srcreg=f"{self.working_dir}/src.reg",
+                bkgreg=f"{self.working_dir}/bkg.reg",
                 outfile=f"{self.working_dir}/fluxes/{obsid}_{filt}.fits",
                 sigma=3.0,
                 skipreason="",
@@ -303,5 +310,7 @@ class UVOTSwift:
                 print(res.stderr)
                 print(res.stdout)
                 with open(f"{self.working_dir}/fluxes/{obsid}_{filt}.log", "w") as f:
-                    f.write(res.stderr)
-                    f.write(res.stdout)
+                    if res.stderr is not None:
+                        f.write(res.stderr)
+                    if res.stdout is not None:
+                        f.write(res.stdout)
