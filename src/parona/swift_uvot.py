@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 from shutil import copytree
 import warnings
 
