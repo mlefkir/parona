@@ -1,7 +1,7 @@
 from parona import ObservationXMM
 import os
 import matplotlib.pyplot as plt
-
+plt.style.use("https://github.com/mlefkir/beauxgraphs/raw/main/beautifulgraphs_colblind.mplstyle")
 
 src_name = 'NGC_4051'
 if not os.path.isdir(src_name):

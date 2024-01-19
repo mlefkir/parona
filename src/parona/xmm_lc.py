@@ -288,6 +288,21 @@ def calculate_Frac_EXP(t_bin, btis):
 
 
 def plot_raw_lc(t, y, fr, btis, filename):
+    """Plot the raw light curve and the fraction of exposure
+    
+    Parameters
+    ----------
+    t : array
+        Array of the time at the start of each time bin
+    y : array
+        Array of the counts in each time bin
+    fr : array
+        Array of the fraction of exposure in each time bin
+    btis : array
+        Array of the start and stop time of each Bad Time Interval
+    filename : str
+        Name of the file to save the plot    
+    """
     cols = ["C1", "C4"]
     labels = ["source", "background"]
     for k in range(2):

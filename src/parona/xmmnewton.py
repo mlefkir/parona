@@ -487,7 +487,8 @@ class ObservationXMM:
                     np.array([self.regions[instr]["src"], self.regions[instr]["bkg"]]),
                     fmt="%s",
                 )
-                python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+                # doesn't work anymore, I don't know why...
+                #python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
 
             else:
@@ -892,6 +893,33 @@ class ObservationXMM:
         t_clip_start=10,
         t_clip_end=100,
     ):
+        """
+        Extract light-curves manually from the event files from both the source and background regions
+        
+        Parameters
+        ----------
+        src_name : str
+            Name of the source
+        binning : float 
+            Binning time in seconds
+        user_defined_bti : list, optional
+            User defined good time intervals, by default None
+        verbose : bool, optional
+            Verbose, by default False
+        min_Frac_EXP : float, optional
+            Minimum fraction of exposure time, by default 0.3
+        CCDNR : int, optional
+            CCD number, by default 4, only for EPIC-PN
+        PATTERN : int, optional
+            Pattern, by default 4, only for EPIC-PN
+        PI : list, optional
+            Energy range, by default [200,10000]
+        t_clip_start : int, optional
+            Clip the first seconds, of the light-curve, by default 10
+        t_clip_end : int, optional
+            Clip the last seconds, of the light-curve, by default 100       
+        
+        """
         src_name += "_"
         print(f"\t<  INFO  > : Generating light-curves manually")
         for instr in self.instruments:
