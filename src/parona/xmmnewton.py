@@ -878,6 +878,12 @@ class ObservationXMM:
                         w("backscale", inargs).run()
             backscale.append(fits.open(output_spectrum)[1].header["BACKSCAL"])
             # print(fits.open(output_spectrum)[1].header["BACKSCAL"])
+            
+        if backscale[1] == 0:
+            raise ValueError("Backscale value for the background is 0")
+        if backscale[0] == 0:
+            raise ValueError("Backscale value for the source is 0")
+        
         return backscale[0] / backscale[1]
 
     def gen_lightcurves_manual(
@@ -959,6 +965,15 @@ class ObservationXMM:
                 ]
                 if glob.glob(output[i]) == []:
                     w("evselect", inargs).run()
+                    
+            # open the event lists to check the CCNR
+            src_hdu = fits.open(src_event_file)
+            if not np.all(src_hdu["EVENTS"].data["CCDNR"] ==4.):
+                raise ValueError("Not all events are in the CCDNR 4 in the source event file")
+            bkg_hdu = fits.open(bkg_event_file)
+            if not np.all(bkg_hdu["EVENTS"].data["CCDNR"] ==4.):
+                raise ValueError("Not all events are in the CCDNR 4 in the background event file")
+            
             # get the backscale value
             scale = self.get_scale_value(src_name, src_event_file, bkg_event_file)
 
