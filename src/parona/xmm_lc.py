@@ -147,7 +147,7 @@ def get_lightcurve(
     # get the user defined bad time intervals
     clean_Frac_EXP = np.minimum(clean_frac_exposures[0], clean_frac_exposures[1])
     if user_defined_bti is not None:
-        frac_exp = calculate_Frac_EXP(t_bin, user_defined_bti)
+        frac_exp = calculate_Frac_EXP(t_bin, user_defined_bti, user_btis=True)
         clean_Frac_EXP = np.minimum(clean_Frac_EXP, frac_exp)
         plot_raw_lc(
             times[0],
@@ -156,6 +156,9 @@ def get_lightcurve(
             [user_defined_bti, user_defined_bti],
             filename="user_lc",
         )
+
+        clean_Frac_EXP = np.where(clean_Frac_EXP < min_Frac_EXP, 0, clean_Frac_EXP)
+        # clean_frac_exposures.append(clean_Frac_EXP)
 
     # np.savetxt('frac_exp.txt',clean_Frac_EXP)
 
@@ -184,6 +187,14 @@ def get_lightcurve(
         clean_Frac_EXP**2,
         out=np.zeros_like(counts[1].astype(float)),
         where=clean_Frac_EXP != 0,
+    )
+
+    plot_raw_lc(
+        times[0],
+        counts,
+        [clean_Frac_EXP, clean_Frac_EXP],
+        None,
+        filename="user_lc_cleaned",
     )
 
     if verbose:
@@ -245,7 +256,7 @@ def get_bad_time_intervals(gtis, T0):
         print("Only one good time interval")
 
 
-def calculate_Frac_EXP(t_bin, btis):
+def calculate_Frac_EXP(t_bin, btis, user_btis=False):
     """Calculate the fraction of the time bin which is not in the Bad Time Interval
 
     Parameters
@@ -254,6 +265,8 @@ def calculate_Frac_EXP(t_bin, btis):
         Array of the time at the start of each time bin, including the end of the last time bin
     btis : array
         Array of the start and stop time of each Bad Time Interval
+    user_btis : bool
+        If True, the btis are given by the user. Default is False.
 
     Returns
     -------
@@ -265,22 +278,28 @@ def calculate_Frac_EXP(t_bin, btis):
     Frac_EXP = np.ones(len(t_bin)) * timebin
     nbtis = len(btis)
     for i in range(nbtis):
-        bti_start = np.searchsorted(t_bin, btis[i][0]) - 1
-        bti_end = np.searchsorted(t_bin, btis[i][1]) - 1
+        if user_btis:
+            lower = np.floor(btis[i][0]/timebin)*timebin
+            higher = np.ceil(btis[i][1]/timebin)*timebin
+        else:
+            lower = btis[i][0]
+            higher = btis[i][1]
+        bti_start = np.searchsorted(t_bin, lower) - 1
+        bti_end = np.searchsorted(t_bin, higher) - 1
         bti_start = max(0, bti_start)
 
         if bti_end >= 0:
             size = bti_end - bti_start
 
             if size == 0:
-                Frac_EXP[bti_start] = Frac_EXP[bti_start] - (btis[i][1] - btis[i][0])
+                Frac_EXP[bti_start] = Frac_EXP[bti_start] - (higher - lower)
             if size > 1:
                 Frac_EXP[bti_start + 1 : bti_end] = 0
             if size > 0:
                 Frac_EXP[bti_start] = Frac_EXP[bti_start] - (
-                    t_bin[bti_start + 1] - btis[i][0]
+                    t_bin[bti_start + 1] - lower
                 )
-                Frac_EXP[bti_end] = Frac_EXP[bti_end] - (btis[i][1] - t_bin[bti_end])
+                Frac_EXP[bti_end] = Frac_EXP[bti_end] - (higher - t_bin[bti_end])
 
     Frac_EXP = Frac_EXP[:-1]
     Frac_EXP = Frac_EXP / timebin
@@ -289,7 +308,7 @@ def calculate_Frac_EXP(t_bin, btis):
 
 def plot_raw_lc(t, y, fr, btis, filename):
     """Plot the raw light curve and the fraction of exposure
-    
+
     Parameters
     ----------
     t : array
@@ -301,7 +320,7 @@ def plot_raw_lc(t, y, fr, btis, filename):
     btis : array
         Array of the start and stop time of each Bad Time Interval
     filename : str
-        Name of the file to save the plot    
+        Name of the file to save the plot
     """
     cols = ["C1", "C4"]
     labels = ["source", "background"]
@@ -320,9 +339,10 @@ def plot_raw_lc(t, y, fr, btis, filename):
         ax[1].set_title("Fraction of exposure")
 
         ax[1].sharex(ax[0])
-        for i in range(2):
-            for bti in btis[k]:
-                ax[i].axvspan(bti[0], bti[1], alpha=0.15, color="C3")
+        if btis is not None:
+            for i in range(2):
+                for bti in btis[k]:
+                    ax[i].axvspan(bti[0], bti[1], alpha=0.15, color="C3")
         fig.align_ylabels()
         fig.tight_layout()
         fig.savefig(f"{filename}_{labels[k]}.png", dpi=300)
