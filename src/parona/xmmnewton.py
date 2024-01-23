@@ -1021,7 +1021,7 @@ class ObservationXMM:
                 ax.set_xlabel("Time (s)")
                 ax.set_ylabel("Rate (cts/s)")
                 ax.errorbar(
-                    t, net, yerr=err, color="k", label="Source", fmt="o", ms=2, mfc="w"
+                    t, net, yerr=err, color="k", label="Net", fmt="o", ms=2, mfc="w"
                 )
                 ax.errorbar(
                     t,
