@@ -142,7 +142,7 @@ def get_lightcurve(
         btis.append(BTI)
         t_bins.append(t_bin)
 
-    plot_raw_lc(times[0], counts, frac_exposures, btis, filename="raw_lc")
+    plot_raw_lc(times[0], counts, frac_exposures, btis, filename=f"raw_lc_{PI[0]/1000}-{PI[1]/1000}")
 
     # get the user defined bad time intervals
     clean_Frac_EXP = np.minimum(clean_frac_exposures[0], clean_frac_exposures[1])
@@ -154,7 +154,7 @@ def get_lightcurve(
             counts,
             [frac_exp, frac_exp],
             [user_defined_bti, user_defined_bti],
-            filename="user_lc",
+            filename=f"user_lc_{PI[0]/1000}-{PI[1]/1000}",
         )
 
         clean_Frac_EXP = np.where(clean_Frac_EXP < min_Frac_EXP, 0, clean_Frac_EXP)
@@ -194,7 +194,7 @@ def get_lightcurve(
         counts,
         [clean_Frac_EXP, clean_Frac_EXP],
         None,
-        filename="user_lc_cleaned",
+        filename=f"user_lc_cleaned_{PI[0]/1000}-{PI[1]/1000}",
     )
 
     if verbose:
@@ -327,8 +327,7 @@ def plot_raw_lc(t, y, fr, btis, filename):
     for k in range(2):
         fig, ax = plt.subplots(2, 1, figsize=(15, 7.5))
         ax[0].step(t, y[k], color=cols[k], label=labels[k], where="post")
-        # ax[0].set_xlabel('Time (s)')
-        ax[0].set_ylabel("Count rate (cts/s)")
+        ax[0].set_ylabel("Count rate (cts)")
         ax[0].legend()
         ax[0].set_title("Light curve (Raw)")
 

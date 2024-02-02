@@ -767,6 +767,22 @@ class ObservationXMM:
         return self.start_time
 
     def get_backscale_value(self, instr, src_name):
+        """ Return the backscale value for the source and background regions
+        
+        Extract the backscale value from the spectrum of the source and background regions
+        
+        Parameters
+        ----------
+        instr : str
+            Instrument name, e.g. "EPN", "EMOS1", "EMOS2"
+        src_name : str
+            Name of the source
+        
+        Returns
+        -------
+        float
+            backscale value for the source region divided by the backscale value for the background region
+        """
         backscale = []
         print(f"\t<  INFO  > : Generating spectra to get backscale value for {instr}")
         if instr == "EPN":
@@ -968,10 +984,14 @@ class ObservationXMM:
                     
             # open the event lists to check the CCNR
             src_hdu = fits.open(src_event_file)
+            print(f"The source events are located on CCD: {np.unique(src_hdu['EVENTS'].data['CCDNR'])}")
+            
             if not np.all(src_hdu["EVENTS"].data["CCDNR"] ==4.):
                 raise ValueError("Not all events are in the CCDNR 4 in the source event file")
             bkg_hdu = fits.open(bkg_event_file)
+            print(f"The background events are located on CCD: {np.unique(bkg_hdu['EVENTS'].data['CCDNR'])}")
             if not np.all(bkg_hdu["EVENTS"].data["CCDNR"] ==4.):
+                print(np.unique(bkg_hdu["EVENTS"].data["CCDNR"]))
                 raise ValueError("Not all events are in the CCDNR 4 in the background event file")
             
             # get the backscale value
