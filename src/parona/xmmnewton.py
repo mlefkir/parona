@@ -3,6 +3,10 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import date
+
+from astropy.wcs import WCS
+from regions import Regions
+from matplotlib.colors import LogNorm
 from pysas.wrapper import Wrapper as w
 from astroquery.esa.xmm_newton import XMMNewton
 from astropy.io import fits
@@ -107,9 +111,9 @@ class ObservationXMM:
         for instr in self.instruments:
             self.instruments_mode.append(
                 query2["mode_friendly_name"][filt_sci][query2["instrument"][filt_sci] == instr][0])
-        modes = dict(zip(self.instruments, self.instruments_mode))
+        self.modes = dict(zip(self.instruments, self.instruments_mode))
         
-        print(f"<  INFO  > : Scientific modes: {modes}")
+        print(f"<  INFO  > : Scientific modes: {self.modes}")
         
         self.obs_files = {}
         self.regions = {}
@@ -433,7 +437,7 @@ class ObservationXMM:
             ] = f"{self.workdir}/{self.ID}_{instr}_image.fits"
             if glob.glob(self.obs_files[instr]["image"]) == []:
                 inargs = [
-                    f'table={self.obs_files[instr]["clean_evts"]}',
+                    f'table={self.obs_files[instr]["evts"]}',
                     "imagebinning=binSize",
                     f'imageset={self.obs_files[instr]["image"]}',
                     "withimageset=yes",
@@ -448,6 +452,39 @@ class ObservationXMM:
                     with contextlib.redirect_stdout(f):
                         w("evselect", inargs).run()
 
+    def plot_image_region(self,hdu, region_file, instruments_mode ):
+        """
+        Plot an image with regions overlaid.
+        """
+        fig,ax = plt.subplots(figsize=(9,8))#,subplot_kw={'projection':wcs})
+
+
+        wcs = WCS(hdu.header)
+        M = hdu.data
+
+        iy = np.all(M==0,axis=1)
+        ix = np.all(M==0,axis=0)
+        ysplit = np.split(iy, np.where(iy == 0.0)[0])
+        xsplit = np.split(ix, np.where(ix == 0.0)[0])
+
+        ystart = ysplit[0].sum()
+        xstart = xsplit[0].sum()
+        ystop = len(iy)-ysplit[-1].sum()
+        xstop = len(ix)-xsplit[-1].sum()
+        
+        
+        im = ax.imshow(M, origin='lower', cmap='cividis', norm=LogNorm(vmin=5))
+        fig.colorbar(im, ax=ax)
+        myreg = Regions.read(region_file, format='ds9')
+        for reg in myreg:
+            reg.to_pixel(wcs).plot(ax=ax)
+        
+        # if instruments_mode == 'Small Window':
+        ax.update({'xlim':(xstart,xstop),'ylim':(ystart,ystop)})
+        fig.tight_layout()
+        
+        return fig, ax
+    
     def select_regions(self, src_name, show_regions=False):
         """
 
@@ -461,6 +498,7 @@ class ObservationXMM:
             self.obs_files[instr][
                 "positions"
             ] = f"{self.workdir}/{self.ID}_{src_name}{instr}_positions.txt"
+            
             if glob.glob(self.obs_files[instr]["positions"]) == []:                
                 if i == 0:
                     try:
@@ -481,6 +519,10 @@ class ObservationXMM:
                 python_ds9.set("regions system physical")
                 self.regions[instr]["src"] = python_ds9.get("regions").split("\n")[0]
                 self.regions[instr]["bkg"] = python_ds9.get("regions").split("\n")[1]
+                python_ds9.set("regions format ds9")
+                python_ds9.set("regions system wcs")
+                python_ds9.set("regions select all")
+                python_ds9.set(f"regions save {self.workdir}/plot_{instr}.reg")
                 
                 np.savetxt(
                     self.obs_files[instr]["positions"],
@@ -496,7 +538,7 @@ class ObservationXMM:
                 self.regions[instr]["src"], self.regions[instr]["bkg"] = np.genfromtxt(
                     self.obs_files[instr]["positions"], dtype="str"
                 )
-            if show_regions:
+            if show_regions or not os.path.isfile(f"{self.workdir}/plot_{instr}.reg") :
                 if i == 0:
                     try:
                         python_ds9.set("regions select all")
@@ -513,11 +555,22 @@ class ObservationXMM:
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
                 python_ds9.set(f'regions load {self.obs_files[instr]["positions"]}')
+                python_ds9.set("regions format ds9")
+                python_ds9.set("regions system wcs")
+                python_ds9.set("regions select all")
+                python_ds9.set(f"regions save {self.workdir}/plot_{instr}.reg")
+                
                 python_ds9.set("regions edit yes")
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
                 python_ds9.set("zoom to fit")
+            hdu = fits.open(self.obs_files[instr]["image"])[0]
+            fig,ax = self.plot_image_region(hdu, f"{self.workdir}/plot_{instr}.reg", self.modes[instr])
+            fig.savefig(f"{self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+            plt.close(fig)
                 # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+
+
 
     def check_pileup(self, src_name):
         """
@@ -535,11 +588,11 @@ class ObservationXMM:
 
             if len(glob.glob(f"{self.plotdir}/*{src_name}*pat.ps")) != 3:
                 inargs = [
-                    f'table={self.obs_files[instr]["clean_evts"]}',
+                    f'table={self.obs_files[instr]["evts"]}',
                     "withfilteredset=yes",
                     f'filteredset={self.obs_files[instr]["clean_filt"]}',
                     "keepfilteroutput=yes",
-                    f'expression=((X,Y) in  {self.regions[instr]["src"]}) && gti({self.obs_files[instr]["gti"]} ,TIME)',
+                    f'expression=((X,Y) in  {self.regions[instr]["src"]})'# && gti({self.obs_files[instr]["gti"]} ,TIME)',
                 ]
 
                 print(f"\t<  INFO  > : Generate an event list for pile-up")
@@ -712,7 +765,8 @@ class ObservationXMM:
         fig.suptitle(f"{self.ID} - Light curves - {self.date}", fontsize=20)
         fig.tight_layout()
         fig.savefig(f"{self.plotdir}/{self.ID}_{src_name}lightcurves.pdf")
-
+        plt.close(fig)
+        
     def find_start_time(self):
         """
 
@@ -1060,6 +1114,7 @@ class ObservationXMM:
                     dpi=300,
                     bbox_inches="tight",
                 )
+                plt.close(fig)
 
     def correct_GTI_timeseries(self, time_src, start_GTI, stop_GTI, dt):
         maxi = len(time_src) - 1
