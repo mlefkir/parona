@@ -15,7 +15,7 @@ def get_lightcurve(
     PATTERN=4,
     PI=[200, 10000],
     t_clip_start=10,
-    t_clip_end=100,
+    t_clip_end=100,suffix=''
 ):
     """
 
@@ -118,17 +118,34 @@ def get_lightcurve(
         t = t_bin[:-1]  # remove the last element of the array
 
         T0 = t[0]
+        if verbose:
+            print(f"T0 = {T0}")
         t_bin = t_bin - T0
 
         ## get the GTIs
         GTI = hdu[f"STDGTI{CCDNR}"].data
         if verbose:
             print(f"Number of GTIs = {len(GTI)}")
+            print(f"GTI start = {GTI['START']}")
+            print(f"GTI stop = {GTI['STOP']}")
+            print(f"GTI start - T0 = {GTI['START'] - T0}")
         if len(GTI) == 1:
-            BTI = np.array([[T0, GTI["START"][0] - T0], [GTI["STOP"][0] - T0, t[-1]]])
+            print("Only one good time interval")
+            if GTI["START"][0] < T0:
+                print("The start of the GTI is before the start of the observation")
+                if GTI["STOP"][0] > t[-1]:
+                    print("The GTI is longer than the observation")
+                    BTI = None
+                else:
+                    BTI = np.array([[GTI["STOP"][0]-T0,t[-1]-T0]])
+            else:
+                BTI = np.array([[T0, GTI["START"][0] - T0], [GTI["STOP"][0] - T0, t[-1]-T0]])
         else:
             BTI = get_bad_time_intervals(GTI, T0)
-        Frac_EXP = calculate_Frac_EXP(t_bin, BTI)
+        if BTI is None:
+            Frac_EXP = np.ones(len(t))
+        else:
+            Frac_EXP = calculate_Frac_EXP(t_bin, BTI)
 
         if np.any(Frac_EXP > 1) or np.any(Frac_EXP < 0):
             raise ValueError("Frac_EXP should be between 0 and 1")
@@ -141,8 +158,9 @@ def get_lightcurve(
         frac_exposures.append(Frac_EXP)
         btis.append(BTI)
         t_bins.append(t_bin)
-
-    plot_raw_lc(times[0], counts, frac_exposures, btis, filename=f"raw_lc_{PI[0]/1000}-{PI[1]/1000}")
+    if btis[0] is None and btis[1] is None:
+        btis = None
+    plot_raw_lc(times[0], counts, frac_exposures, btis, filename=f"raw_lc_{PI[0]/1000}-{PI[1]/1000}{suffix}")
 
     # get the user defined bad time intervals
     clean_Frac_EXP = np.minimum(clean_frac_exposures[0], clean_frac_exposures[1])
@@ -194,7 +212,7 @@ def get_lightcurve(
         counts,
         [clean_Frac_EXP, clean_Frac_EXP],
         None,
-        filename=f"user_lc_cleaned_{PI[0]/1000}-{PI[1]/1000}",
+        filename=f"user_lc_cleaned_{PI[0]/1000}-{PI[1]/1000}{suffix}",
     )
 
     if verbose:
@@ -327,7 +345,7 @@ def plot_raw_lc(t, y, fr, btis, filename):
     for k in range(2):
         fig, ax = plt.subplots(2, 1, figsize=(15, 7.5))
         ax[0].step(t, y[k], color=cols[k], label=labels[k], where="post")
-        ax[0].set_ylabel("Count rate (cts)")
+        ax[0].set_ylabel("Counts")
         ax[0].legend()
         ax[0].set_title("Light curve (Raw)")
 
@@ -345,3 +363,4 @@ def plot_raw_lc(t, y, fr, btis, filename):
         fig.align_ylabels()
         fig.tight_layout()
         fig.savefig(f"{filename}_{labels[k]}.png", dpi=300)
+        plt.close(fig)

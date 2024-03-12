@@ -49,17 +49,18 @@ class ObservationXMM:
         2keV-3keV and 3keV-12keV
     replot : bool, optional
         Replot the light curves, by default True
-    
+
 
     """
-    
+
     def __init__(
         self,
         path,
         obsidentifier,
         slices=["all"],
         instruments=["EPN", "EMOS1", "EMOS2"],
-        energybands=[[200, 3000], [3000, 12000]],replot=True,
+        energybands=[[200, 3000], [3000, 12000]],
+        replot=True,
     ):
         """
 
@@ -110,11 +111,14 @@ class ObservationXMM:
 
         for instr in self.instruments:
             self.instruments_mode.append(
-                query2["mode_friendly_name"][filt_sci][query2["instrument"][filt_sci] == instr][0])
+                query2["mode_friendly_name"][filt_sci][
+                    query2["instrument"][filt_sci] == instr
+                ][0]
+            )
         self.modes = dict(zip(self.instruments, self.instruments_mode))
-        
+
         print(f"<  INFO  > : Scientific modes: {self.modes}")
-        
+
         self.obs_files = {}
         self.regions = {}
 
@@ -211,7 +215,7 @@ class ObservationXMM:
             with open(f"{self.logdir}/epproc.log", "w+") as f:
                 with contextlib.redirect_stdout(f):
                     w("epproc", []).run()
-        if with_MOS and ("EMOS1" in self.instruments or "EMOS2" in self.instruments ):
+        if with_MOS and ("EMOS1" in self.instruments or "EMOS2" in self.instruments):
             if glob.glob(f"{self.workdir}/*MOS*ImagingEvts*") == [] and (
                 "EMOS1" in self.instruments or "EMOS2" in self.instruments
             ):
@@ -240,7 +244,7 @@ class ObservationXMM:
         for instr in self.instruments:
             self.obs_files[instr]["evts"] = self.find_eventfile(instr)
             print(
-                f'<  INFO  > : The raw event list selected for {instr} is: {self.obs_files[instr]["evts"].replace(self.workdir,"")}'
+                f'<  INFO  > : The raw event list selected for {instr} is: {[i.replace(self.workdir,"") for i in  self.obs_files[instr]["evts"]]}'
             )
 
     def find_RGS_eventfiles(self):
@@ -269,24 +273,28 @@ class ObservationXMM:
         Return the raw event list file
 
         If there is only one event list file in the workdir, it will return it.
-        Else, it will return the biggest file in the workdir.
-        
+        Else, it will return the event lists with with a size > 50 Mo.
+
         Parameters
         ----------
         instr : str
             Instrument name, e.g. "EPN", "EMOS1", "EMOS2"
         """
         buff = glob.glob(f"{self.workdir}/*{instr}_*ImagingEvts*")
-        size = 0
         if len(buff) == 1:
-            input_eventfile = buff[0]
+            input_eventfile = [buff[0]]
         else:
+            input_eventfile = []
             for i, res in enumerate(buff):
-                if os.path.getsize(res) > size:
-                    size = os.path.getsize(res)
-                    input_eventfile = buff[i]
+                if "_S0" in res:
+                    if os.path.getsize(res) / 1e6 < 20:
+                        print("<  WARNING  > : The event list is smaller than 20 MB, it will be ignored")
+                    else:
+                        input_eventfile.append(buff[i])
+                elif "_U0" in res and os.path.getsize(res) / 1e6 > 50:
+                    input_eventfile.append(buff[i])
 
-        return input_eventfile
+        return sorted(input_eventfile)
 
     def gen_flarelc(self):
         """
@@ -390,39 +398,6 @@ class ObservationXMM:
                     with contextlib.redirect_stdout(f):
                         w("tabgtigen", inargs).run()
 
-    def gen_clean_evts(self):
-        """
-
-        Generating cleaned event list
-
-        """
-        print(f"<  INFO  > : Generating clean event lists")
-        for instr in self.instruments:
-            print(f"\t<  INFO  > : Processing instrument : {instr}")
-            self.obs_files[instr][
-                "clean_evts"
-            ] = f"{self.workdir}/{self.ID}_{instr}_evts_clean.fits"
-
-            if glob.glob(self.obs_files[instr]["clean_evts"]) == []:
-                if "PN" in instr:
-                    expression = f'#XMMEA_EP && gti( {self.obs_files[instr]["gti"]} , TIME ) && (PI >150)'
-                else:
-                    expression = f'#XMMEA_EM && gti( {self.obs_files[instr]["gti"]} , TIME ) && (PI >150)'
-
-                inargs = [
-                    f'table={self.obs_files[instr]["evts"]}',
-                    "withfilteredset=Y",
-                    f'filteredset={self.obs_files[instr]["clean_evts"]}',
-                    "destruct=Y",
-                    "keepfilteroutput=T",
-                    f"expression={expression}",
-                ]
-
-                print(f"<  INFO  > : Filtering flares to produce events list")
-                with open(f"{self.logdir}/{instr}_filtering_flares.log", "w+") as f:
-                    with contextlib.redirect_stdout(f):
-                        w("evselect", inargs).run()
-
     def gen_images(self):
         """
 
@@ -431,60 +406,67 @@ class ObservationXMM:
         """
         print(f"<  INFO  > : Generating images")
         for instr in self.instruments:
-            print(f"\t<  INFO  > : Processing instrument : {instr}")
-            self.obs_files[instr][
-                "image"
-            ] = f"{self.workdir}/{self.ID}_{instr}_image.fits"
-            if glob.glob(self.obs_files[instr]["image"]) == []:
-                inargs = [
-                    f'table={self.obs_files[instr]["evts"]}',
-                    "imagebinning=binSize",
-                    f'imageset={self.obs_files[instr]["image"]}',
-                    "withimageset=yes",
-                    "xcolumn=X",
-                    "ycolumn=Y",
-                    "ximagebinsize=80",
-                    "yimagebinsize=80",
-                ]
+            self.obs_files[instr]["image"] = []
+            print(
+                f"\t<  INFO  > : Processing instrument : {instr} with {len(self.obs_files[instr]['evts'])} event lists"
+            )
+            for i, evts in enumerate(self.obs_files[instr]["evts"]):
 
-                print(f"\t<  INFO  > : Generate an image")
-                with open(f"{self.logdir}/{instr}_image.log", "w+") as f:
-                    with contextlib.redirect_stdout(f):
-                        w("evselect", inargs).run()
+                suffix = "" if i == 0 else f"_{i}"
+                self.obs_files[instr]["image"].append(
+                    f"{self.workdir}/{self.ID}_{instr}_image{suffix}.fits"
+                )
+                if (
+                    glob.glob(f"{self.workdir}/{self.ID}_{instr}_image{suffix}.fits")
+                    == []
+                ):
+                    inargs = [
+                        f"table={evts}",  # only the first event list is used
+                        "imagebinning=binSize",
+                        f'imageset={f"{self.workdir}/{self.ID}_{instr}_image{suffix}.fits"}',
+                        "withimageset=yes",
+                        "xcolumn=X",
+                        "ycolumn=Y",
+                        "ximagebinsize=80",
+                        "yimagebinsize=80",
+                    ]
 
-    def plot_image_region(self,hdu, region_file, instruments_mode ):
+                    print(f"\t<  INFO  > : Generate an image")
+                    with open(f"{self.logdir}/{instr}_image{suffix}.log", "w+") as f:
+                        with contextlib.redirect_stdout(f):
+                            w("evselect", inargs).run()
+
+    def plot_image_region(self, hdu, region_file, instruments_mode):
         """
         Plot an image with regions overlaid.
         """
-        fig,ax = plt.subplots(figsize=(9,8))#,subplot_kw={'projection':wcs})
-
+        fig, ax = plt.subplots(figsize=(9, 8))  # ,subplot_kw={'projection':wcs})
 
         wcs = WCS(hdu.header)
         M = hdu.data
 
-        iy = np.all(M==0,axis=1)
-        ix = np.all(M==0,axis=0)
+        iy = np.all(M == 0, axis=1)
+        ix = np.all(M == 0, axis=0)
         ysplit = np.split(iy, np.where(iy == 0.0)[0])
         xsplit = np.split(ix, np.where(ix == 0.0)[0])
 
         ystart = ysplit[0].sum()
         xstart = xsplit[0].sum()
-        ystop = len(iy)-ysplit[-1].sum()
-        xstop = len(ix)-xsplit[-1].sum()
-        
-        
-        im = ax.imshow(M, origin='lower', cmap='cividis', norm=LogNorm(vmin=5))
+        ystop = len(iy) - ysplit[-1].sum()
+        xstop = len(ix) - xsplit[-1].sum()
+
+        im = ax.imshow(M, origin="lower", cmap="cividis", norm=LogNorm(vmin=5))
         fig.colorbar(im, ax=ax)
-        myreg = Regions.read(region_file, format='ds9')
+        myreg = Regions.read(region_file, format="ds9")
         for reg in myreg:
             reg.to_pixel(wcs).plot(ax=ax)
-        
+
         # if instruments_mode == 'Small Window':
-        ax.update({'xlim':(xstart,xstop),'ylim':(ystart,ystop)})
+        ax.update({"xlim": (xstart, xstop), "ylim": (ystart, ystop)})
         fig.tight_layout()
-        
+
         return fig, ax
-    
+
     def select_regions(self, src_name, show_regions=False):
         """
 
@@ -493,86 +475,136 @@ class ObservationXMM:
         """
         print(f"<  INFO  > : Selection of source and background regions with ds9")
 
-        for i,instr in enumerate(self.instruments):
-            print(f"\t<  INFO  > : Processing instrument : {instr}")
-            self.obs_files[instr][
-                "positions"
-            ] = f"{self.workdir}/{self.ID}_{src_name}{instr}_positions.txt"
-            
-            if glob.glob(self.obs_files[instr]["positions"]) == []:                
-                if i == 0:
-                    try:
-                        python_ds9.set("regions select all")
-                    except:
-                        python_ds9 = start_ds9()
-
-                python_ds9.set("regions select all")
-                python_ds9.set("regions delete")
-                python_ds9.set("file " + self.obs_files[instr]["evts"])
-                python_ds9.set("bin to fit")
-                python_ds9.set("scale log")
-                python_ds9.set("cmap b")
-                print("Draw FIRST the region for the source and THEN the background")
-                input("Press Enter to continue...")
-                python_ds9.set("regions edit yes")
-                python_ds9.set("regions format ciao")
-                python_ds9.set("regions system physical")
-                self.regions[instr]["src"] = python_ds9.get("regions").split("\n")[0]
-                self.regions[instr]["bkg"] = python_ds9.get("regions").split("\n")[1]
-                python_ds9.set("regions format ds9")
-                python_ds9.set("regions system wcs")
-                python_ds9.set("regions select all")
-                python_ds9.set(f"regions save {self.workdir}/plot_{instr}.reg")
-                
-                np.savetxt(
-                    self.obs_files[instr]["positions"],
-                    np.array([self.regions[instr]["src"], self.regions[instr]["bkg"]]),
-                    fmt="%s",
-                )
-                # doesn't work anymore, I don't know why...
-                #python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
-
-
+        for i, instr in enumerate(self.instruments):
+            print(
+                f"\t<  INFO  > : Processing instrument : {instr} with {len(self.obs_files[instr]['evts'])} event lists"
+            )
+            if len(self.obs_files[instr]["evts"]) > 1:
+                self.obs_files[instr]["positions"] = []
+                self.regions[instr]["src"] = []
+                self.regions[instr]["bkg"] = []
             else:
-                print(f"\t<  INFO  > : Reading regions from {self.obs_files[instr]['positions']}")
-                self.regions[instr]["src"], self.regions[instr]["bkg"] = np.genfromtxt(
-                    self.obs_files[instr]["positions"], dtype="str"
-                )
-            if show_regions or not os.path.isfile(f"{self.workdir}/plot_{instr}.reg") :
-                if i == 0:
-                    try:
-                        python_ds9.set("regions select all")
-                    except:
-                        python_ds9 = start_ds9()
 
-                python_ds9.set("regions select all")
-                python_ds9.set("regions delete")
-                python_ds9.set("file " + self.obs_files[instr]["evts"])
-                python_ds9.set("bin to fit")
-                python_ds9.set("scale log")
-                python_ds9.set("cmap b")
-                python_ds9.set("regions edit yes")
-                python_ds9.set("regions format ciao")
-                python_ds9.set("regions system physical")
-                python_ds9.set(f'regions load {self.obs_files[instr]["positions"]}')
-                python_ds9.set("regions format ds9")
-                python_ds9.set("regions system wcs")
-                python_ds9.set("regions select all")
-                python_ds9.set(f"regions save {self.workdir}/plot_{instr}.reg")
-                
-                python_ds9.set("regions edit yes")
-                python_ds9.set("regions format ciao")
-                python_ds9.set("regions system physical")
-                python_ds9.set("zoom to fit")
-            hdu = fits.open(self.obs_files[instr]["image"])[0]
-            fig,ax = self.plot_image_region(hdu, f"{self.workdir}/plot_{instr}.reg", self.modes[instr])
-            fig.savefig(f"{self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
-            plt.close(fig)
+                self.obs_files[instr][
+                    "positions"
+                ] = f"{self.workdir}/{self.ID}_{src_name}{instr}_positions.txt"
+                self.regions[instr]["src"] = ""
+                self.regions[instr]["bkg"] = ""
+            for j, evts in enumerate(self.obs_files[instr]["evts"]):
+                suffix = "" if j == 0 else f"_{j}"
+                if len(self.obs_files[instr]["evts"]) > 1:
+                    self.obs_files[instr]["positions"].append(
+                        f"{self.workdir}/{self.ID}_{src_name}{instr}_positions{suffix}.txt"
+                    )
+                curr_file = (
+                    f"{self.workdir}/{self.ID}_{src_name}{instr}_positions{suffix}.txt"
+                )
+                if glob.glob(curr_file) == []:
+                    if i == 0:
+                        try:
+                            python_ds9.set("regions select all")
+                        except:
+                            python_ds9 = start_ds9()
+
+                    python_ds9.set("regions select all")
+                    python_ds9.set("regions delete")
+                    python_ds9.set("file " + evts)
+                    python_ds9.set("bin to fit")
+                    python_ds9.set("scale log")
+                    python_ds9.set("cmap b")
+                    print(
+                        "Draw FIRST the region for the source and THEN the background"
+                    )
+                    input("Press Enter to continue...")
+                    python_ds9.set("regions edit yes")
+                    python_ds9.set("regions format ciao")
+                    python_ds9.set("regions system physical")
+                    if len(self.obs_files[instr]["evts"]) > 1:
+                        self.regions[instr]["src"].append(
+                            python_ds9.get("regions").split("\n")[0]
+                        )
+                        self.regions[instr]["bkg"].append(
+                            python_ds9.get("regions").split("\n")[1]
+                        )
+                    else:
+                        self.regions[instr]["src"] = python_ds9.get("regions").split(
+                            "\n"
+                        )[0]
+                        self.regions[instr]["bkg"] = python_ds9.get("regions").split(
+                            "\n"
+                        )[1]
+                    python_ds9.set("regions format ds9")
+                    python_ds9.set("regions system wcs")
+                    python_ds9.set("regions select all")
+                    python_ds9.set(
+                        f"regions save {self.workdir}/plot_{instr}{suffix}.reg"
+                    )
+
+                    np.savetxt(
+                        curr_file,
+                        np.array(
+                            [self.regions[instr]["src"], self.regions[instr]["bkg"]]
+                        ),
+                        fmt="%s",
+                    )
+                    # doesn't work anymore, I don't know why...
+                    # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+
+                else:
+                    print(
+                        f"\t<  INFO  > : Reading regions from {self.obs_files[instr]['positions']}"
+                    )
+                    if len(self.obs_files[instr]["evts"]) == 1:
+                        self.regions[instr]["src"], self.regions[instr]["bkg"] = (
+                            np.genfromtxt(curr_file, dtype="str")
+                        )
+                    else:
+                        src, bkg = np.genfromtxt(curr_file, dtype="str")
+                        self.regions[instr]["src"].append(src)
+                        self.regions[instr]["bkg"].append(bkg)
+
+                if show_regions or not os.path.isfile(
+                    f"{self.workdir}/plot_{instr}{suffix}.reg"
+                ):
+                    if i == 0:
+                        try:
+                            python_ds9.set("regions select all")
+                        except:
+                            python_ds9 = start_ds9()
+
+                    python_ds9.set("regions select all")
+                    python_ds9.set("regions delete")
+                    python_ds9.set("file " + evts)
+                    python_ds9.set("bin to fit")
+                    python_ds9.set("scale log")
+                    python_ds9.set("cmap b")
+                    python_ds9.set("regions edit yes")
+                    python_ds9.set("regions format ciao")
+                    python_ds9.set("regions system physical")
+                    python_ds9.set(f"regions load {curr_file}")
+                    python_ds9.set("regions format ds9")
+                    python_ds9.set("regions system wcs")
+                    python_ds9.set("regions select all")
+                    python_ds9.set(
+                        f"regions save {self.workdir}/plot_{instr}{suffix}.reg"
+                    )
+
+                    python_ds9.set("regions edit yes")
+                    python_ds9.set("regions format ciao")
+                    python_ds9.set("regions system physical")
+                    python_ds9.set("zoom to fit")
+
+                hdu = fits.open(self.obs_files[instr]["image"][j])[0]
+                fig, ax = self.plot_image_region(
+                    hdu, f"{self.workdir}/plot_{instr}{suffix}.reg", self.modes[instr]
+                )
+                fig.savefig(
+                    f"{self.plotdir}/{self.ID}_{src_name}{instr}_image{suffix}.png"
+                )
+                plt.close(fig)
                 # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
-
-
-    def check_pileup(self, src_name):
+    def check_pileup(self, src_name,CCDNR=4):
         """
 
         Check pileup with epatplot
@@ -580,37 +612,62 @@ class ObservationXMM:
         """
         print("<  INFO  > : Checking pile-up during observation")
         for instr in self.instruments:
-            print(f"\t<  INFO  > : Processing instrument : {instr}")
-            self.obs_files[instr]["epatplot"] = f"{self.ID}_{src_name}{instr}_pat.ps"
-            self.obs_files[instr][
-                "clean_filt"
-            ] = f"{self.workdir}/{self.ID}_{instr}_clean_filtered.fits"
+            print(
+                f"\t<  INFO  > : Processing instrument : {instr} with {len(self.obs_files[instr]['evts'])} event lists"
+            )
+            if len(self.obs_files[instr]["evts"]) > 1:
+                self.obs_files[instr]["epatplot"] = []
+                self.obs_files[instr]["clean_filt"] = []
+            else:
+                self.obs_files[instr][
+                    "epatplot"
+                ] = f"{self.ID}_{src_name}{instr}_pat.ps"
+                self.obs_files[instr][
+                    "clean_filt"
+                ] = f"{self.workdir}/{self.ID}_{instr}_clean_filtered.fits"
 
-            if len(glob.glob(f"{self.plotdir}/*{src_name}*pat.ps")) != 3:
-                inargs = [
-                    f'table={self.obs_files[instr]["evts"]}',
-                    "withfilteredset=yes",
-                    f'filteredset={self.obs_files[instr]["clean_filt"]}',
-                    "keepfilteroutput=yes",
-                    f'expression=((X,Y) in  {self.regions[instr]["src"]})'# && gti({self.obs_files[instr]["gti"]} ,TIME)',
-                ]
-
-                print(f"\t<  INFO  > : Generate an event list for pile-up")
-                with open(f"{self.logdir}/{src_name}{instr}_pileup.log", "w+") as f:
-                    with contextlib.redirect_stdout(f):
-                        w("evselect", inargs).run()
-                inargs = [
-                    f'set={self.obs_files[instr]["clean_filt"]}',
-                    f'plotfile={self.obs_files[instr]["epatplot"]}',
-                ]
-                print(f"\t<  INFO  > : Running epatplot to evaluate pile-up")
-                with open(f"{self.logdir}/{src_name}{instr}_epatplot.log", "w+") as f:
-                    with contextlib.redirect_stdout(f):
-                        w("epatplot", inargs).run()
-                shutil.move(
-                    self.obs_files[instr]["epatplot"],
-                    f"{self.plotdir}/{self.obs_files[instr]['epatplot']}",
+            for ne, evts in enumerate(self.obs_files[instr]["evts"]):
+                suffix = "" if ne == 0 else f"_{ne}"
+                curr_pat = f"{self.ID}_{src_name}{instr}_pat{suffix}.ps"
+                curr_clean = (
+                    f"{self.workdir}/{self.ID}_{instr}_clean_filtered{suffix}.fits"
                 )
+                if len(self.obs_files[instr]["evts"]) > 1:
+                    self.obs_files[instr]["epatplot"].append(curr_pat)
+                    self.obs_files[instr]["clean_filt"].append(curr_clean)
+                    src = self.regions[instr]["src"][ne]
+                else:
+                    src = self.regions[instr]["src"]
+
+                if glob.glob(f"{self.plotdir}/{curr_pat}") == []:
+                    inargs = [
+                        f"table={evts}",
+                        "withfilteredset=yes",
+                        f'filteredset={curr_clean}',
+                        "keepfilteroutput=yes",
+                        f'expression=((X,Y) in  {src}) && gti({evts}:STDGTI{CCDNR:02d} ,TIME)',
+                    ]
+
+                    print(f"\t<  INFO  > : Generate an event list for pile-up")
+                    with open(
+                        f"{self.logdir}/{src_name}{instr}_pileup{suffix}.log", "w+"
+                    ) as f:
+                        with contextlib.redirect_stdout(f):
+                            w("evselect", inargs).run()
+                    inargs = [
+                        f'set={curr_clean}',
+                        f'plotfile={curr_pat}',
+                    ]
+                    print(f"\t<  INFO  > : Running epatplot to evaluate pile-up")
+                    with open(
+                        f"{self.logdir}/{src_name}{instr}_epatplot{suffix}.log", "w+"
+                    ) as f:
+                        with contextlib.redirect_stdout(f):
+                            w("epatplot", inargs).run()
+                    shutil.move(
+                        curr_pat,
+                        f"{self.plotdir}/{curr_pat}",
+                    )
 
     def gen_lightcurves(
         self, src_name, binning, absolute_corrections=False, write_bin_tag=False
@@ -766,7 +823,7 @@ class ObservationXMM:
         fig.tight_layout()
         fig.savefig(f"{self.plotdir}/{self.ID}_{src_name}lightcurves.pdf")
         plt.close(fig)
-        
+
     def find_start_time(self):
         """
 
@@ -821,17 +878,17 @@ class ObservationXMM:
         return self.start_time
 
     def get_backscale_value(self, instr, src_name):
-        """ Return the backscale value for the source and background regions
-        
+        """Return the backscale value for the source and background regions
+
         Extract the backscale value from the spectrum of the source and background regions
-        
+
         Parameters
         ----------
         instr : str
             Instrument name, e.g. "EPN", "EMOS1", "EMOS2"
         src_name : str
             Name of the source
-        
+
         Returns
         -------
         float
@@ -889,7 +946,7 @@ class ObservationXMM:
             print(fits.open(output_spectrum)[1].header["BACKSCAL"])
         return backscale[0] / backscale[1]
 
-    def get_scale_value(self, src_name, src_event_file, bkg_event_file):
+    def get_scale_value(self, src_name, src_event_file, bkg_event_file, suffix=""):
         backscale = []
         instr = fits.open(src_event_file)["PRIMARY"].header["INSTRUME"]
         instr_bkg = fits.open(bkg_event_file)["PRIMARY"].header["INSTRUME"]
@@ -911,7 +968,7 @@ class ObservationXMM:
             [src_event_file, bkg_event_file], ["src", "bkg"]
         ):
             # ---generate the spectrum
-            output_spectrum = f"{self.workdir}/{self.ID}_{src_name}{instr}_spectrum_{name_tag}_BACKSCALE.fits"
+            output_spectrum = f"{self.workdir}/{self.ID}_{src_name}{instr}_spectrum_{name_tag}_BACKSCALE{suffix}.fits"
             if instr == "EPN":
                 flag = "(FLAG==0) "
             elif instr == "EMOS1" or instr == "EMOS2":
@@ -933,7 +990,7 @@ class ObservationXMM:
             if glob.glob(output_spectrum) == []:
                 print(f"<  INFO  > : Generate {name_tag} spectrum for BACKSCALE")
                 with open(
-                    f"{self.logdir}/{src_name}{instr}_{name_tag}_spectrum_BACKSCALE.log",
+                    f"{self.logdir}/{src_name}{instr}_{name_tag}_spectrum_BACKSCALE{suffix}.log",
                     "w+",
                 ) as f:
                     with contextlib.redirect_stdout(f):
@@ -941,19 +998,19 @@ class ObservationXMM:
                 # run backscale
                 inargs = [f"spectrumset={output_spectrum}"]
                 with open(
-                    f"{self.logdir}/{src_name}{instr}_{name_tag}_backscale_BACKSCALE.log",
+                    f"{self.logdir}/{src_name}{instr}_{name_tag}_backscale_BACKSCALE{suffix}.log",
                     "w+",
                 ) as f:
                     with contextlib.redirect_stdout(f):
                         w("backscale", inargs).run()
             backscale.append(fits.open(output_spectrum)[1].header["BACKSCAL"])
             # print(fits.open(output_spectrum)[1].header["BACKSCAL"])
-            
+
         if backscale[1] == 0:
             raise ValueError("Backscale value for the background is 0")
         if backscale[0] == 0:
             raise ValueError("Backscale value for the source is 0")
-        
+
         return backscale[0] / backscale[1]
 
     def gen_lightcurves_manual(
@@ -971,12 +1028,12 @@ class ObservationXMM:
     ):
         """
         Extract light-curves manually from the event files from both the source and background regions
-        
+
         Parameters
         ----------
         src_name : str
             Name of the source
-        binning : float 
+        binning : float
             Binning time in seconds
         user_defined_bti : list, optional
             User defined good time intervals, by default None
@@ -993,309 +1050,153 @@ class ObservationXMM:
         t_clip_start : int, optional
             Clip the first seconds, of the light-curve, by default 10
         t_clip_end : int, optional
-            Clip the last seconds, of the light-curve, by default 100       
-        
+            Clip the last seconds, of the light-curve, by default 100
+
         """
         src_name += "_"
         print(f"\t<  INFO  > : Generating light-curves manually")
         for instr in self.instruments:
             print(f"\t<  INFO  > : Processing instrument : {instr}")
-            event_file = self.obs_files[instr]["evts"]
+            print(
+                f"\t<  INFO  > : Number of event files : {len(self.obs_files[instr]['evts'])}"
+            )
+            for ne, event_file in enumerate(self.obs_files[instr]["evts"]):
+                print(PI)
+                print(f"\t<  INFO  > : Processing event file : {event_file}, ne={ne}")
+                if ne == 0:
+                    suffix = ""
+                else:
+                    suffix = f"_{ne}"
+                event_file_filtered = f"{instr}_barely_filtered{suffix}.fits"
 
-            event_file_filtered = f"{instr}_barely_filtered.fits"
+                if instr == "EPN":
+                    expression = "#XMMEA_EP && FLAG == 0"
+                else:
+                    raise NotImplementedError("Only EPN implemented")
+                    # expression = "#XMMEA_EM && FLAG == 0"
 
-            if instr == "EPN":
-                expression = "#XMMEA_EP && FLAG == 0"
-            else:
-                raise NotImplementedError("Only EPN implemented")
-                expression = "#XMMEA_EM && FLAG == 0"
-
-            # generate a barely filtered event file
-            inargs = [
-                f"table={event_file}",
-                "withfilteredset=Y",
-                f"filteredset={event_file_filtered}",
-                f"expression={expression}",
-            ]
-            if glob.glob(event_file_filtered) == []:
-                w("evselect", inargs).run()
-
-            # generate the source and background event files
-            src_event_file = f"{src_name}{instr}_evts_src.fits"
-            bkg_event_file = f"{src_name}{instr}_evts_bkg.fits"
-            output = [src_event_file, bkg_event_file]
-            regions = [self.regions[instr]["src"], self.regions[instr]["bkg"]]
-
-            for i, reg in enumerate(regions):
+                # generate a barely filtered event file
                 inargs = [
-                    f"table={event_file_filtered}",
+                    f"table={event_file}",
                     "withfilteredset=Y",
-                    f"filteredset={output[i]}",
-                    f"expression=((X,Y) in  {reg})",
+                    f"filteredset={event_file_filtered}",
+                    f"expression={expression}",
                 ]
-                if glob.glob(output[i]) == []:
+                if glob.glob(event_file_filtered) == []:
                     w("evselect", inargs).run()
-                    
-            # open the event lists to check the CCNR
-            src_hdu = fits.open(src_event_file)
-            print(f"The source events are located on CCD: {np.unique(src_hdu['EVENTS'].data['CCDNR'])}")
-            
-            if not np.all(src_hdu["EVENTS"].data["CCDNR"] ==4.):
-                raise ValueError("Not all events are in the CCDNR 4 in the source event file")
-            bkg_hdu = fits.open(bkg_event_file)
-            print(f"The background events are located on CCD: {np.unique(bkg_hdu['EVENTS'].data['CCDNR'])}")
-            if not np.all(bkg_hdu["EVENTS"].data["CCDNR"] ==4.):
-                print(np.unique(bkg_hdu["EVENTS"].data["CCDNR"]))
-                raise ValueError("Not all events are in the CCDNR 4 in the background event file")
-            
-            # get the backscale value
-            scale = self.get_scale_value(src_name, src_event_file, bkg_event_file)
 
-            if type(PI[0]) == int:
-                energies = [PI]
-            else:
-                energies = PI
-
-            for PI in energies:
-                print(
-                    f"\t<  INFO  > : Processing energy range : {PI[0]/1000}-{PI[1]/1000} keV"
-                )
-
-                t, net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0 = get_lightcurve(
-                    src_event_file,
-                    bkg_event_file,
-                    scale,
-                    user_defined_bti=user_defined_bti,
-                    verbose=verbose,
-                    min_Frac_EXP=min_Frac_EXP,
-                    CCDNR=CCDNR,
-                    input_timebin_size=binning,
-                    PATTERN=PATTERN,
-                    PI=PI,
-                    t_clip_start=t_clip_start,
-                    t_clip_end=t_clip_end,
-                )
-
-                # save the lightcurve
-                # arr = np.array([t, net,err,bg,bg_err,Frac_EXP],dtype=float).T
-                arr = np.array([t, net, err, bg, bg_err], dtype=float).T
-                frac = np.array([t_bin[:-1], clean_Frac_EXP], dtype=float).T
-                np.savetxt(
-                    f"{src_name}{instr}_{self.ID}_lc_{PI[0]/1000}-{PI[1]/1000}.txt",
-                    arr,
-                    header=f"T0 (TT): {T0}" + "\n T" + "\ntime net err bg bg_err",
-                )
-                np.savetxt(
-                    f"{src_name}{instr}_{self.ID}_{PI[0]/1000}-{PI[1]/1000}_frac.txt",
-                    frac,
-                    header=f"T0: {T0}" + "\ntime clean_Frac_EXP",
-                )
-
-                fig, ax = plt.subplots(figsize=(15, 5))
-                ax.set_xlabel("Time (s)")
-                ax.set_ylabel("Rate (cts/s)")
-                ax.errorbar(
-                    t, net, yerr=err, color="k", label="Net", fmt="o", ms=2, mfc="w"
-                )
-                ax.errorbar(
-                    t,
-                    bg,
-                    yerr=bg_err,
-                    color="r",
-                    label="Background",
-                    fmt="o",
-                    ms=2,
-                    mfc="w",
-                )
-                # ax[1].errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=3,mfc='w')
-                ax.legend()
-                fig.savefig(
-                    f"lightcurve_{PI[0]/1000}-{PI[1]/1000}.png",
-                    dpi=300,
-                    bbox_inches="tight",
-                )
-                plt.close(fig)
-
-    def correct_GTI_timeseries(self, time_src, start_GTI, stop_GTI, dt):
-        maxi = len(time_src) - 1
-        k = 0
-        L = []
-
-        time = time_src - dt / 2  # time_src is the middle of the time bin
-
-        for i in range(maxi):
-            if time[i] < start_GTI[k]:
-                print(
-                    "Start of the time bin is before the start of the good time interval"
-                )
-                if time[i + 1] < start_GTI[k]:
-                    print(
-                        "1. End of the time bin is before the start of the good time interval"
-                    )
-                    print(f"i={i} Time bin is not in any good time interval\n")
-                    L.append(0)
+                # generate the source and background event files
+                src_event_file = f"{src_name}{instr}_evts_src{suffix}.fits"
+                bkg_event_file = f"{src_name}{instr}_evts_bkg{suffix}.fits"
+                output = [src_event_file, bkg_event_file]
+                if len(self.obs_files[instr]["evts"]) > 1:
+                    regions = [
+                        self.regions[instr]["src"][ne],
+                        self.regions[instr]["bkg"][ne],
+                    ]
                 else:
-                    print(
-                        "2. End of the time bin is after the start of the good time interval"
+                    regions = [self.regions[instr]["src"], self.regions[instr]["bkg"]]
+
+                for i, reg in enumerate(regions):
+                    inargs = [
+                        f"table={event_file_filtered}",
+                        "withfilteredset=Y",
+                        f"filteredset={output[i]}",
+                        f"expression=((X,Y) in  {reg})",
+                    ]
+                    if glob.glob(output[i]) == []:
+                        w("evselect", inargs).run()
+
+                # open the event lists to check the CCNR
+                src_hdu = fits.open(src_event_file)
+                print(
+                    f"The source events are located on CCD: {np.unique(src_hdu['EVENTS'].data['CCDNR'])}"
+                )
+
+                if not np.all(src_hdu["EVENTS"].data["CCDNR"] == 4.0):
+                    raise ValueError(
+                        "Not all events are in the CCDNR 4 in the source event file"
                     )
-                    if time[i + 1] < stop_GTI[k]:
-                        print(
-                            "2.1. End of the time bin is before the end of the good time interval"
-                        )
-                        fracexp = (time[i + 1] - start_GTI[k]) / (time[i + 1] - time[i])
-                    else:
-                        print(
-                            "2.2. End of the time bin is after the end of the good time interval"
-                        )
-                        fracexp = (stop_GTI[k] - start_GTI[k]) / (time[i + 1] - time[i])
+                bkg_hdu = fits.open(bkg_event_file)
+                print(
+                    f"The background events are located on CCD: {np.unique(bkg_hdu['EVENTS'].data['CCDNR'])}"
+                )
+                if not np.all(bkg_hdu["EVENTS"].data["CCDNR"] == 4.0):
+                    print(np.unique(bkg_hdu["EVENTS"].data["CCDNR"]))
+                    raise ValueError(
+                        "Not all events are in the CCDNR 4 in the background event file"
+                    )
 
-                        j = k + 1
-                        while time[i + 1] > start_GTI[j]:
-                            print(f"2.2.1 j = {j}")
-                            if time[i + 1] < stop_GTI[j]:
-                                fracexp += (time[i + 1] - start_GTI[j]) / (
-                                    time[i + 1] - time[i]
-                                )
-                                k = j
-                                print(f"BREAK: {k}")
-                                break
-                            fracexp += (stop_GTI[j] - start_GTI[j]) / (
-                                time[i + 1] - time[i]
-                            )
-                            j += 1
-                        k = j
-                    print(fracexp)
-                    print(f"i={i} Time bin is partially in the good time interval\n")
-                    L.append(fracexp)
-                    # k = k+1
-            else:
-                if time[i + 1] < stop_GTI[k]:
-                    print(f"i={i} 3. Time bin is fully in the good time interval\n")
-                    L.append(1)
+                # get the backscale value
+                scale = self.get_scale_value(
+                    src_name, src_event_file, bkg_event_file, suffix=suffix
+                )
 
+                if type(PI[0]) == int:
+                    energies = [PI]
                 else:
+                    energies = PI
+
+                for pi in energies:
                     print(
-                        f"4. End of the time bin is after the end of the good time interval"
+                        f"\t<  INFO  > : Processing energy range : {pi[0]/1000}-{pi[1]/1000} keV"
                     )
 
-                    fracexp = (stop_GTI[k] - time[i]) / (time[i + 1] - time[i])
-                    j = k + 1
-                    while time[i + 1] > start_GTI[j]:
-                        print(f"j = {j}")
-                        if time[i + 1] < stop_GTI[j]:
-                            fracexp += (time[i + 1] - start_GTI[j]) / (
-                                time[i + 1] - time[i]
-                            )
-                            k = j
-                            print(f"BREAK: {j}")
-                            break
-                        fracexp += (stop_GTI[j] - start_GTI[j]) / (
-                            time[i + 1] - time[i]
-                        )
-                        print(f"iterate {j} {fracexp}")
-                        j += 1
+                    t, net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0 = get_lightcurve(
+                        src_event_file,
+                        bkg_event_file,
+                        scale,
+                        user_defined_bti=user_defined_bti,
+                        verbose=verbose,
+                        min_Frac_EXP=min_Frac_EXP,
+                        CCDNR=CCDNR,
+                        input_timebin_size=binning,
+                        PATTERN=PATTERN,
+                        PI=pi,
+                        t_clip_start=t_clip_start,
+                        t_clip_end=t_clip_end,
+                        suffix=suffix,
+                    )
 
-                    k = j
-                    print(fracexp)
-                    print(f"i={i} Time bin is partially in the good time interval\n")
+                    # save the lightcurve
+                    # arr = np.array([t, net,err,bg,bg_err,Frac_EXP],dtype=float).T
+                    arr = np.array([t, net, err, bg, bg_err], dtype=float).T
+                    frac = np.array([t_bin[:-1], clean_Frac_EXP], dtype=float).T
+                    np.savetxt(
+                        f"{src_name}{instr}_{self.ID}_lc_{pi[0]/1000}-{pi[1]/1000}{suffix}.txt",
+                        arr,
+                        header=f"T0 (TT): {T0}" + "\n T" + "\ntime net err bg bg_err",
+                    )
+                    np.savetxt(
+                        f"{src_name}{instr}_{self.ID}_{pi[0]/1000}-{pi[1]/1000}_frac{suffix}.txt",
+                        frac,
+                        header=f"T0: {T0}" + "\ntime clean_Frac_EXP",
+                    )
 
-                    L.append(fracexp)
-
-        if time[-1] >= start_GTI[k]:
-            if time[-1] + dt < stop_GTI[k]:
-                L.append(1)
-            else:
-                fracexp = (stop_GTI[k] - time[-1]) / (dt)
-                L.append(fracexp)
-        else:
-            L.append(0)
-
-        return np.array(L)
-
-    def rescale_rate(
-        self,
-        time_src,
-        start_GTI,
-        stop_GTI,
-        rate_src,
-        rate_err_src,
-        rate_bkg,
-        rate_err_bkg,
-        dt,
-        scale,
-    ):
-        corr_gti = self.correct_GTI_timeseries(time_src, start_GTI, stop_GTI, dt)
-        rate_corrected = np.copy(rate_src) - np.copy(rate_bkg) * scale
-        nonzero_corr = np.where(corr_gti != 0)
-        rate_corrected[nonzero_corr] = (
-            rate_src[nonzero_corr] - rate_bkg[nonzero_corr]
-        ) / corr_gti[nonzero_corr]
-        rate_err_corrected = np.sqrt(rate_err_src**2 + (rate_err_bkg * scale) ** 2)
-        return rate_corrected, rate_err_corrected, corr_gti
-
-    def write_fits(self, time_src, rate, rate_err, corr_gti, filename):
-        PRIMARY = fits.PrimaryHDU()
-        RATE_TABLE = fits.BinTableHDU.from_columns(
-            [
-                fits.Column(name="TIME", format="D", array=time_src),
-                fits.Column(name="RATE", format="D", array=rate),
-                fits.Column(name="ERROR", format="D", array=rate_err),
-                fits.Column(name="FRACEXP", format="D", array=corr_gti),
-            ]
-        )
-        RATE_TABLE.name = "RATE"
-        hdu_list = fits.HDUList([PRIMARY, RATE_TABLE])
-        print(f"Writing {filename}...")
-        print(hdu_list.info())
-        print(hdu_list[1].header)
-        print(hdu_list[1].data)
-        hdu_list.writeto(f"manual_{filename}_lightcurve.fits", overwrite=True)
-        return hdu_list
-
-    def create_lightcurve(self, instr, src_name):
-        for energy_range in self.energybands:
-            low, up = energy_range
-            filename = f"{src_name}_lc_{instr}_{low/1000}_{up/1000}"
-
-            src_lc = fits.open(
-                f"{self.workdir}/{self.ID}_{src_name}{instr}_lc_src_{low/1000}-{up/1000}.fits"
-            )
-            bkg_lc = fits.open(
-                f"{self.workdir}/{self.ID}_{src_name}{instr}_lc_bkg_{low/1000}-{up/1000}.fits"
-            )
-            pn_gti = fits.open(self.obs_files[instr]["gti"])
-
-            start_GTI, stop_GTI = (
-                pn_gti["STDGTI"].data["START"],
-                pn_gti["STDGTI"].data["STOP"],
-            )
-            rate_src, rate_err_src, time_src = (
-                src_lc["RATE"].data["RATE"],
-                src_lc["RATE"].data["ERROR"],
-                src_lc["RATE"].data["TIME"],
-            )
-            rate_bkg, rate_err_bkg, time_bkg = (
-                bkg_lc["RATE"].data["RATE"],
-                bkg_lc["RATE"].data["ERROR"],
-                bkg_lc["RATE"].data["TIME"],
-            )
-            dt = time_src[1] - time_src[0]
-            scale = self.get_backscale_value(instr, src_name)
-            rate_corrected, rate_err_corrected, corr_gti = self.rescale_rate(
-                time_src,
-                start_GTI,
-                stop_GTI,
-                rate_src,
-                rate_err_src,
-                rate_bkg,
-                rate_err_bkg,
-                dt,
-                scale,
-            )
-            hdulist = self.write_fits(
-                time_src, rate_corrected, rate_err_corrected, corr_gti, filename
-            )
-            return hdulist
+                    fig, ax = plt.subplots(figsize=(15, 5))
+                    ax.set_xlabel("Time (s)")
+                    ax.set_ylabel("Rate (cts/s)")
+                    ax.errorbar(
+                        t, net, yerr=err, color="k", label="Net", fmt="o", ms=2, mfc="w"
+                    )
+                    ax.errorbar(
+                        t,
+                        bg,
+                        yerr=bg_err,
+                        color="r",
+                        label="Background",
+                        fmt="o",
+                        ms=2,
+                        mfc="w",
+                    )
+                    # ax[1].errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=3,mfc='w')
+                    ax.legend()
+                    fig.savefig(
+                        f"lightcurve_{pi[0]/1000}-{pi[1]/1000}{suffix}.png",
+                        dpi=300,
+                        bbox_inches="tight",
+                    )
+                    plt.close(fig)
 
     def RGS_disp(self):
         """    
