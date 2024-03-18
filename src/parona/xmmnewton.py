@@ -286,7 +286,7 @@ class ObservationXMM:
         else:
             input_eventfile = []
             for i, res in enumerate(buff):
-                if "_S0" in res:
+                if "_S0" in res or "_S" in res:
                     if os.path.getsize(res) / 1e6 < 20:
                         print("<  WARNING  > : The event list is smaller than 20 MB, it will be ignored")
                     else:
