@@ -5,7 +5,7 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import date
-from pysas.wrapper import Wrapper as w
+# from pysas.wrapper import Wrapper as w
 from astropy.io import fits
 from astropy.table import Table
 import contextlib
@@ -35,6 +35,8 @@ class ObservationXMM:
         self.instruments = ["EPN", "EMOS1", "EMOS2"]
         self.obs_files = {}
         self.regions = {}
+        from pysas.wrapper import Wrapper as w
+
 
         for instr in self.instruments:
             self.obs_files[instr] = {}
@@ -336,12 +338,13 @@ class ObservationXMM:
         """
         print(f'<  INFO  > : Selection of source and background regions with ds9')
 
-        for instr in self.instruments:
+        for i,instr in enumerate(self.instruments):
             print(f'\t<  INFO  > : Processing instrument : {instr}')
-            try:
-                python_ds9.set("regions select all")
-            except:
-                python_ds9 = start_ds9()
+            if i ==0 :
+                try:
+                    python_ds9.set("regions select all")
+                except:
+                    python_ds9 = start_ds9()
 
             python_ds9.set("regions select all")
             python_ds9.set("regions delete")

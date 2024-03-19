@@ -4,6 +4,8 @@ import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from .callds9 import start_ds9
+from astroquery.heasarc import Heasarc
+from astropy.time import Time
 
 def energy2nustarchannel(energy_keV):
     return (energy_keV - 1.6)/0.04
@@ -26,22 +28,27 @@ class ObservationNuSTAR:
 
     """
 
-    def __init__(self, path, obsidentifier, date, **kwargs):
+    def __init__(self, path, obsidentifier, src_name,slices=["all"]):
         self.ID = obsidentifier
-        self.date = date
-        self.slices = kwargs.get('slices', ["all"])
+        self.slices = slices
         self.nslices = len(self.slices)
         self.instruments = ["FPMA", "FPMB"]
         self.obs_files = {}
         self.regions = {}
-
+        
+        heasarc = Heasarc()
+        self.src_name = src_name
+        table = heasarc.query_object(src_name, mission='numaster')
+        indx = np.take(np.where(table["OBSID"]==self.ID),0)
+        self.date = Time(table[indx]["TIME"],format='mjd').iso[:10]
+        
         for instr in self.instruments:
             self.obs_files[instr] = {}
             self.regions[instr] = {}
 
-        self.energybands = k[[3.0, 10.0], [10.0, 79.0]]
+        self.energybands = [[3.0, 10.0], [10.0, 79.0]]
         self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
-            np.array(self.s).flatten())]
+            np.array(self.energybands).flatten())]
 
         self.check_repertories(path)
         self.replot = True
@@ -84,15 +91,15 @@ class ObservationNuSTAR:
         """
         print(f'<  INFO  > : Selection of source and background regions with ds9')
 
-        for instr in self.instruments:
-
-            self.obs_files[instr]["image"] = f"{self.workdir}/nu{self.ID}{instr[-1]}01_cl.evt"
-
+        for i,instr in enumerate(self.instruments):
             print(f'\t<  INFO  > : Processing instrument : {instr}')
-            try:
-                python_ds9.set("regions select all")
-            except:
-                python_ds9 = start_ds9()
+            if i ==0 :
+                try:
+                    python_ds9.set("regions select all")
+                except:
+                    python_ds9 = start_ds9()
+                    
+            self.obs_files[instr]["image"] = f"{self.workdir}/nu{self.ID}{instr[-1]}01_cl.evt"
 
             python_ds9.set("regions select all")
             python_ds9.set("regions delete")
@@ -100,19 +107,19 @@ class ObservationNuSTAR:
             python_ds9.set("scale asinh")
             python_ds9.set("cmap b")
 
-            if len(glob.glob(f"{self.workdir}/products/*.reg")) != 4:
+            if len(glob.glob(f"{self.workdir}/products/*{instr}.reg")) != 2:
                 print(
-                    "Draw FIRST the region for the source save it as a src_FPMA.reg and bkg_FPMB.reg and THEN the background")
+                    f"Draw FIRST the region for the source save it as a src_{instr}.reg and bkg_{instr}.reg and THEN the background")
                 input("Press Enter to continue...")
                 python_ds9.set("regions edit yes")
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
 
             python_ds9.set("zoom to fit")
-            python_ds9.set(
-                f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+            # python_ds9.set(
+                # f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
-    def gen_lightcurves(self, src_name):
+    def gen_lightcurves(self, src_name,bintime=500):
         """
         Generate light curves for source and background for all energy bands
         Generate background subtracted light-curve
@@ -121,8 +128,7 @@ class ObservationNuSTAR:
         if self.nobin:
             tag = "nobin"
         else:
-            tag = ""
-            binsize = {"FPMA": 1000, "FPMB": 1000}
+            tag = f"{bintime}s"
 
         print('<  INFO  > : Generating light-curves')
         for instr in self.instruments:
@@ -142,7 +148,7 @@ class ObservationNuSTAR:
                             srcregionfile='{self.workdir}/products/src_{instr}.reg' \
                             bkgregionfile='{self.workdir}/products/bkg_{instr}.reg' \
                             instrument='{instr}' steminputs='nu{self.ID}' pilow='{int(energy2nustarchannel(low))}'  \
-                            pihigh='{int(energy2nustarchannel(up))}'  binsize=1000  \
+                            pihigh='{int(energy2nustarchannel(up))}'  binsize={bintime}  \
                             lcfile='{lc_src_name}' bkglcfile='{lc_bkg_name}'  \
                             imagefile=None runmkarf=no runmkrmf=no bkgphafile=NONE phafile=NONE 2>&1  | tee '{self.logdir}/nuproducts_{instr}_{low}_{up}.txt' """)
         self.plot_light_curves(src_name)
