@@ -288,7 +288,9 @@ class ObservationXMM:
             for i, res in enumerate(buff):
                 if "_S0" in res or "_S" in res:
                     if os.path.getsize(res) / 1e6 < 20:
-                        print("<  WARNING  > : The event list is smaller than 20 MB, it will be ignored")
+                        print(
+                            "<  WARNING  > : The event list is smaller than 20 MB, it will be ignored"
+                        )
                     else:
                         input_eventfile.append(buff[i])
                 elif "_U0" in res and os.path.getsize(res) / 1e6 > 50:
@@ -436,7 +438,7 @@ class ObservationXMM:
                         with contextlib.redirect_stdout(f):
                             w("evselect", inargs).run()
 
-    def plot_image_region(self, hdu, region_file, instruments_mode):
+    def plot_image_region(self, hdu, region_file):
         """
         Plot an image with regions overlaid.
         """
@@ -461,7 +463,6 @@ class ObservationXMM:
         for reg in myreg:
             reg.to_pixel(wcs).plot(ax=ax)
 
-        # if instruments_mode == 'Small Window':
         ax.update({"xlim": (xstart, xstop), "ylim": (ystart, ystop)})
         fig.tight_layout()
 
@@ -596,7 +597,7 @@ class ObservationXMM:
 
                 hdu = fits.open(self.obs_files[instr]["image"][j])[0]
                 fig, ax = self.plot_image_region(
-                    hdu, f"{self.workdir}/plot_{instr}{suffix}.reg", self.modes[instr]
+                    hdu, f"{self.workdir}/plot_{instr}{suffix}.reg"
                 )
                 fig.savefig(
                     f"{self.plotdir}/{self.ID}_{src_name}{instr}_image{suffix}.png"
@@ -604,7 +605,7 @@ class ObservationXMM:
                 plt.close(fig)
                 # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
-    def check_pileup(self, src_name,CCDNR=4):
+    def check_pileup(self, src_name, CCDNR=4):
         """
 
         Check pileup with epatplot
@@ -643,9 +644,9 @@ class ObservationXMM:
                     inargs = [
                         f"table={evts}",
                         "withfilteredset=yes",
-                        f'filteredset={curr_clean}',
+                        f"filteredset={curr_clean}",
                         "keepfilteroutput=yes",
-                        f'expression=((X,Y) in  {src}) && gti({evts}:STDGTI{CCDNR:02d} ,TIME)',
+                        f"expression=((X,Y) in  {src}) && gti({evts}:STDGTI{CCDNR:02d} ,TIME)",
                     ]
 
                     print(f"\t<  INFO  > : Generate an event list for pile-up")
@@ -655,8 +656,8 @@ class ObservationXMM:
                         with contextlib.redirect_stdout(f):
                             w("evselect", inargs).run()
                     inargs = [
-                        f'set={curr_clean}',
-                        f'plotfile={curr_pat}',
+                        f"set={curr_clean}",
+                        f"plotfile={curr_pat}",
                     ]
                     print(f"\t<  INFO  > : Running epatplot to evaluate pile-up")
                     with open(
