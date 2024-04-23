@@ -199,15 +199,6 @@ class ObservationNuSTAR:
                             imagefile=None runmkarf=no runmkrmf=no bkgphafile=NONE phafile=NONE 2>&1  | tee '{self.logdir}/nuproducts_{instr}_{low}_{up}.txt' """)
         self.plot_light_curves(src_name,tag)
 
-                    os.system(f"""nuproducts indir='{self.workdir}' outdir='{self.workdir}/products' \
-                        srcregionfile='{self.workdir}/products/src_{instr}.reg' \
-                        bkgregionfile='{self.workdir}/products/bkg_{instr}.reg' \
-                        instrument='{instr}' steminputs='nu{self.ID}' pilow='{int(energy2nustarchannel(low))}'  \
-                        pihigh='{int(energy2nustarchannel(up))}'  binsize=1000  \
-                        lcfile='{lc_src_name}' bkglcfile='{lc_bkg_name}'  \
-                        imagefile=None runmkarf=no runmkrmf=no bkgphafile=NONE phafile=NONE 2>&1  | tee '{self.logdir}/nuproducts_{instr}_{low}_{up}.txt' """)
-        self.plot_light_curves(src_name)
-
     def plot_light_curves(self, src_name,tag):
         """
         Plot light_curves
