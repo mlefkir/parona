@@ -153,9 +153,12 @@ class ObservationXMM:
                 f'sas_odf={glob.glob(f"{self.workdir}/*SUM.SAS")[0]}',
                 f"workdir={self.workdir}",
             ]
-            with open(f"{self.logdir}/startsas_bis.log", "w+") as f:
-                with contextlib.redirect_stdout(f):
-                    w("startsas", inargs).run()
+            os.environ["SAS_CCF"] = glob.glob(f"{self.workdir}/ccf.cif")[0]
+            os.environ["SAS_ODF"] = glob.glob(f"{self.workdir}/*SUM.SAS")[0]
+        
+            # with open(f"{self.logdir}/startsas_bis.log", "w+") as f:
+            #     with contextlib.redirect_stdout(f):
+            #         w("startsas", inargs).run()
 
         os.chdir(self.workdir)
 
