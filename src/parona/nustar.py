@@ -79,8 +79,7 @@ class ObservationNuSTAR:
         """
         os.chdir(self.workdir)
         if not len(glob.glob(f"{self.workdir}/*")) > 4:
-            os.system(
-                f"nupipeline indir='{self.datadir}' steminputs='nu{self.ID}' outdir='{self.workdir}' 2>&1  | tee '{self.logdir}/nupipeline.txt'")
+            os.system(f"nupipeline indir='{self.datadir}' steminputs='nu{self.ID}' outdir='{self.workdir}' 2>&1  | tee '{self.logdir}/nupipeline.txt'")
         for instr in self.instruments:
             self.obs_files[instr]["gti"] = f"{self.workdir}/nu{self.ID}{instr[-1]}01_cl.evt"
 
@@ -124,6 +123,7 @@ class ObservationNuSTAR:
         print('<  INFO  > : Generating event files')
         for instr in self.instruments:
             print(f'\t<  INFO  > : Processing instrument : {instr}')
+            # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
             if len(glob.glob(f"{self.workdir}/products/{src_name}_evts_*_{instr}.fits"))!=2:
                 print(f'\t\t<  INFO  > : Extracting source and background events')
@@ -169,6 +169,15 @@ class ObservationNuSTAR:
         print('<  INFO  > : Generating light-curves')
         for instr in self.instruments:
             print(f'\t<  INFO  > : Processing instrument : {instr}')
+            for energy_range in self.energybands:
+                low, up = energy_range
+                lc_src_name = f"{self.workdir}/products/{self.ID}_{src_name}{instr}_lc{tag}_src_{low}-{up}.fits"
+                lc_bkg_name = f"{self.workdir}/products/{self.ID}_{src_name}{instr}_lc{tag}_bkg_{low}-{up}.fits"
+
+                if glob.glob(lc_src_name) == [] or glob.glob(lc_bkg_name) == []:
+                    print(
+                        f'\t\t<  INFO  > : Generate src and bkg light curves {low}-{up} keV')
+
 
             if len(glob.glob(f"{self.workdir}/products/*{src_name}_{instr}*lc_*")) != len(self.energybands):
                 for energy_range in self.energybands:
@@ -189,6 +198,15 @@ class ObservationNuSTAR:
                             lcfile='{lc_src_name}' bkglcfile='{lc_bkg_name}'  \
                             imagefile=None runmkarf=no runmkrmf=no bkgphafile=NONE phafile=NONE 2>&1  | tee '{self.logdir}/nuproducts_{instr}_{low}_{up}.txt' """)
         self.plot_light_curves(src_name,tag)
+
+                    os.system(f"""nuproducts indir='{self.workdir}' outdir='{self.workdir}/products' \
+                        srcregionfile='{self.workdir}/products/src_{instr}.reg' \
+                        bkgregionfile='{self.workdir}/products/bkg_{instr}.reg' \
+                        instrument='{instr}' steminputs='nu{self.ID}' pilow='{int(energy2nustarchannel(low))}'  \
+                        pihigh='{int(energy2nustarchannel(up))}'  binsize=1000  \
+                        lcfile='{lc_src_name}' bkglcfile='{lc_bkg_name}'  \
+                        imagefile=None runmkarf=no runmkrmf=no bkgphafile=NONE phafile=NONE 2>&1  | tee '{self.logdir}/nuproducts_{instr}_{low}_{up}.txt' """)
+        self.plot_light_curves(src_name)
 
     def plot_light_curves(self, src_name,tag):
         """
