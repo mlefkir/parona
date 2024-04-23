@@ -7,6 +7,7 @@ from .callds9 import start_ds9
 from astroquery.heasarc import Heasarc
 from astropy.time import Time
 import heasoftpy as hsp
+from .xmm_lc import get_lightcurve
 
 def energy2nustarchannel(energy_keV):
     return (energy_keV - 1.6)/0.04
@@ -118,24 +119,28 @@ class ObservationNuSTAR:
             python_ds9.set("zoom to fit")
             # python_ds9.set(
                 # f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
-    def extract_events(self,src_name):
+    def extract_events(self,src_name,low=3.0,up=79.0):
         """Extract event files for source and background"""
         print('<  INFO  > : Generating event files')
+        
         for instr in self.instruments:
             print(f'\t<  INFO  > : Processing instrument : {instr}')
             # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
+
+            evts_src_name = f"{self.workdir}/products/{src_name}_evts_src_{instr}.fits"
+            evts_bkg_name = f"{self.workdir}/products/{src_name}_evts_bkg_{instr}.fits"
+            spec_src_name = f"{self.workdir}/products/{src_name}_spec_src_{instr}.fits"
+            spec_bkg_name = f"{self.workdir}/products/{src_name}_spec_bkg_{instr}.fits"
+                
             if len(glob.glob(f"{self.workdir}/products/{src_name}_evts_*_{instr}.fits"))!=2:
                 print(f'\t\t<  INFO  > : Extracting source and background events')
 
-                evts_src_name = f"{self.workdir}/products/{src_name}_evts_src_{instr}.fits"
-                evts_bkg_name = f"{self.workdir}/products/{src_name}_evts_bkg_{instr}.fits"
-
                 if glob.glob(evts_src_name) == []:
                     hsp.extractor(
-                    filename=f"nu{self.ID}A01_cl.evt", 
+                    filename=f"{self.workdir}/nu{self.ID}A01_cl.evt", 
                     eventsout=evts_src_name,
-                    regionfile=f"src_{instr}.reg",
+                    regionfile=f"{self.workdir}/products/src_{instr}.reg",
                     imgfile='NONE',fitsbinlc='NONE',
                     binlc=500.0,
                     phafile='NONE',fitsbinpha='NONE',
@@ -145,19 +150,112 @@ class ObservationNuSTAR:
                 
                 if glob.glob(evts_bkg_name) == []:
                     hsp.extractor(
-                    filename=f"nu{self.ID}A01_cl.evt", 
+                    filename=f"{self.workdir}/nu{self.ID}A01_cl.evt", 
                     eventsout=evts_bkg_name,
-                    regionfile=f"bkg_{instr}.reg",
+                    regionfile=f"{self.workdir}/products/bkg_{instr}.reg",
                     imgfile='NONE',fitsbinlc='NONE',
                     binlc=500.0,
                     phafile='NONE',fitsbinpha='NONE',
                     timefile='NONE',xcolf='X', xcolh='X',ycolf='Y', ycolh='Y',
                     polwcol='NONE',stokes='NONE',tcol='TIME', ecol='PI'
                     );
+            print(f'\t\t<  INFO  > : Extracting source and background spectra')   
+            if glob.glob(spec_src_name) == [] or glob.glob(spec_bkg_name) == []:
+                os.system(f"""nuproducts indir='{self.workdir}' outdir='{self.workdir}/products' \
+                    srcregionfile='{self.workdir}/products/src_{instr}.reg' \
+                    bkgregionfile='{self.workdir}/products/bkg_{instr}.reg' \
+                    instrument='{instr}' steminputs='nu{self.ID}' pilow='{int(energy2nustarchannel(low))}' \
+                    pihigh='{int(energy2nustarchannel(up))}' \
+                    lcfile=None bkglcfile=None imagefile=None rungrppha=no \
+                    runmkarf=no runmkrmf=no \
+                    bkgphafile='{spec_bkg_name}' \
+                    phafile='{spec_src_name}' 2>&1  | tee '{self.logdir}/nuproducts_spectra_{instr}.txt'""")
+
             else:
                 print(f'\t\t<  INFO  > : Source and background events already extracted')
 
-                    
+    def gen_lightcurves_manual(self, src_name,energies=[[3.0,10.],[10.0,79.0]],input_timebin_size=500):
+        """
+        Generate light curves for source and background for all energy bands
+        Generate background subtracted light-curve
+        """
+
+        print('<  INFO  > : Generating light-curves'    )
+        for instr in self.instruments:
+            print(f'\t<  INFO  > : Processing instrument : {instr}')
+            
+            evts_src_name = f"{self.workdir}/products/{src_name}_evts_src_{instr}.fits"
+            evts_bkg_name = f"{self.workdir}/products/{src_name}_evts_bkg_{instr}.fits"
+            spec_src_name = f"{self.workdir}/products/{src_name}_spec_src_{instr}.fits"
+            spec_bkg_name = f"{self.workdir}/products/{src_name}_spec_bkg_{instr}.fits"
+                
+            src_backscal = fits.open(spec_src_name)["SPECTRUM"].header["BACKSCAL"]
+            bkg_backscal = fits.open(spec_bkg_name)["SPECTRUM"].header["BACKSCAL"]
+            
+            scale = src_backscal/bkg_backscal
+            
+
+            for en in energies:
+                print(f"\t<  INFO  > : Processing energy range : {en[0]}-{en[1]} keV")
+
+                PI_min = np.rint(energy2nustarchannel(en[0])).astype(int)
+                PI_max = np.rint(energy2nustarchannel(en[1])).astype(int)
+                print(f"\t\t<  INFO  > : PI_min : {PI_min} PI_max : {PI_max}")
+            
+                t, net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0 = get_lightcurve(
+                    evts_src_name,
+                    evts_bkg_name,
+                    scale,
+                    user_defined_bti=None,
+                    verbose=True,
+                    min_Frac_EXP=0.3,
+                    CCDNR='',
+                    input_timebin_size=input_timebin_size,
+                    PATTERN=4,
+                    PI=[PI_min, PI_max],
+                    t_clip_start=10,
+                    t_clip_end=100,
+                    suffix="",
+                    is_nustar=True)
+
+                arr = np.array([t, net, err, bg, bg_err], dtype=float).T
+                frac = np.array([t_bin[:-1], clean_Frac_EXP], dtype=float).T
+                print(en)
+                np.savetxt(
+                    f"{src_name}{instr}_{self.ID}_lc_{en[0]}-{en[1]}.txt",
+                    arr,
+                    header=f"T0 (TT): {T0}" + "\n T" + "\ntime net err bg bg_err",
+                )
+                np.savetxt(
+                    f"{src_name}{instr}_{self.ID}_{en[0]}-{en[1]}_frac.txt",
+                    frac,
+                    header=f"T0: {T0}" + "\ntime clean_Frac_EXP",
+                )
+
+                fig, ax = plt.subplots(figsize=(15, 5))
+                ax.set_xlabel("Time (s)")
+                ax.set_ylabel("Rate (cts/s)")
+                ax.errorbar(
+                    t, net, yerr=err, color="k", label="Net", fmt="o", ms=2, mfc="w"
+                )
+                ax.errorbar(
+                    t,
+                    bg,
+                    yerr=bg_err,
+                    color="r",
+                    label="Background",
+                    fmt="o",
+                    ms=2,
+                    mfc="w",
+                )
+                # ax[1].errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=3,mfc='w')
+                ax.legend()
+                fig.savefig(
+                    f"lightcurve_{instr}_{en[0]}-{en[1]}.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+                plt.close(fig)
 
     def gen_lightcurves(self, src_name,bintime=500,correctlc=False):
         """

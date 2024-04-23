@@ -15,7 +15,9 @@ def get_lightcurve(
     PATTERN=4,
     PI=[200, 10000],
     t_clip_start=10,
-    t_clip_end=100,suffix=''
+    t_clip_end=100,
+    suffix="",
+    is_nustar=False,
 ):
     """
 
@@ -33,7 +35,7 @@ def get_lightcurve(
         Verbose mode.
     min_Frac_EXP : float
         Minimum fraction of exposure to consider a bin good.
-    CCDNR : int
+    CCDNR : int,str
         CCD number. Default is 4 for pn.
     input_timebin_size : float
         Time bin size in seconds.
@@ -64,12 +66,17 @@ def get_lightcurve(
 
     """
     # input_timebin_size  in s is the time bin size for the light curve chosen by the user
-    CCDNR = f"{CCDNR:02d}"
+    if isinstance(CCDNR, int):
+        CCDNR = f"{CCDNR:02d}"
+    if is_nustar:
+        assert CCDNR == "", "CCDNR should be empty for NuSTAR"
 
     hdu = fits.open(src_event_file)
-
-    FRAME_TIME = hdu[f"STDGTI{CCDNR}"].header["FRMTIME"]  # in ms
+    if not is_nustar:
+        FRAME_TIME = hdu[f"STDGTI{CCDNR}"].header["FRMTIME"]  # in ms
     # in practice we want a timebinsize which is a multiple of the frame time
+    else:
+        FRAME_TIME = 0.1  # in ms
     N_frames_per_bin = np.ceil(input_timebin_size * 1000 / FRAME_TIME).astype(
         int
     )  # integer number of frames per bin
@@ -94,7 +101,11 @@ def get_lightcurve(
         event_table = hdu["EVENTS"].data
 
         # mask for the pattern and the energy
-        mask_PATTERN = event_table["PATTERN"] <= PATTERN
+        if is_nustar:
+            pattern_name = "GRADE"
+        else:
+            pattern_name = "PATTERN"
+        mask_PATTERN = event_table[pattern_name] <= PATTERN
         mask_energy = (PI[0] < event_table["PI"]) & (event_table["PI"] < PI[1])
         mask = mask_PATTERN & mask_energy
 
@@ -126,9 +137,9 @@ def get_lightcurve(
         GTI = hdu[f"STDGTI{CCDNR}"].data
         if verbose:
             print(f"Number of GTIs = {len(GTI)}")
-            print(f"GTI start = {GTI['START']}")
-            print(f"GTI stop = {GTI['STOP']}")
-            print(f"GTI start - T0 = {GTI['START'] - T0}")
+            # print(f"GTI start = {GTI['START']}")
+            # print(f"GTI stop = {GTI['STOP']}")
+            # print(f"GTI start - T0 = {GTI['START'] - T0}")
         if len(GTI) == 1:
             print("Only one good time interval")
             if GTI["START"][0] < T0:
@@ -137,9 +148,11 @@ def get_lightcurve(
                     print("The GTI is longer than the observation")
                     BTI = None
                 else:
-                    BTI = np.array([[GTI["STOP"][0]-T0,t[-1]-T0]])
+                    BTI = np.array([[GTI["STOP"][0] - T0, t[-1] - T0]])
             else:
-                BTI = np.array([[T0, GTI["START"][0] - T0], [GTI["STOP"][0] - T0, t[-1]-T0]])
+                BTI = np.array(
+                    [[T0, GTI["START"][0] - T0], [GTI["STOP"][0] - T0, t[-1] - T0]]
+                )
         else:
             BTI = get_bad_time_intervals(GTI, T0)
         if BTI is None:
@@ -160,8 +173,13 @@ def get_lightcurve(
         t_bins.append(t_bin)
     if btis[0] is None and btis[1] is None:
         btis = None
-    plot_raw_lc(times[0], counts, frac_exposures, btis, filename=f"raw_lc_{PI[0]/1000}-{PI[1]/1000}{suffix}")
-
+    plot_raw_lc(
+        times[0],
+        counts,
+        frac_exposures,
+        btis,
+        filename=f"raw_lc_{PI[0]/1000}-{PI[1]/1000}{suffix}",
+    )
     # get the user defined bad time intervals
     clean_Frac_EXP = np.minimum(clean_frac_exposures[0], clean_frac_exposures[1])
     if user_defined_bti is not None:
@@ -297,8 +315,8 @@ def calculate_Frac_EXP(t_bin, btis, user_btis=False):
     nbtis = len(btis)
     for i in range(nbtis):
         if user_btis:
-            lower = np.floor(btis[i][0]/timebin)*timebin
-            higher = np.ceil(btis[i][1]/timebin)*timebin
+            lower = np.floor(btis[i][0] / timebin) * timebin
+            higher = np.ceil(btis[i][1] / timebin) * timebin
         else:
             lower = btis[i][0]
             higher = btis[i][1]
