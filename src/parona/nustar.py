@@ -4,6 +4,9 @@ import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
 from .callds9 import start_ds9
+from astroquery.heasarc import Heasarc
+from astropy.time import Time
+import heasoftpy as hsp
 
 def energy2nustarchannel(energy_keV):
     return (energy_keV - 1.6)/0.04
@@ -26,21 +29,27 @@ class ObservationNuSTAR:
 
     """
 
-    def __init__(self, path, obsidentifier, date, **kwargs):
+    def __init__(self, path, obsidentifier, src_name,slices=["all"]):
         self.ID = obsidentifier
-        self.date = date
-        self.slices = kwargs.get('slices', ["all"])
+        self.slices = slices
         self.nslices = len(self.slices)
         self.instruments = ["FPMA", "FPMB"]
         self.obs_files = {}
         self.regions = {}
-
+        
+        heasarc = Heasarc()
+        self.src_name = src_name
+        table = heasarc.query_object(src_name, mission='numaster')
+        indx = np.take(np.where(table["OBSID"]==self.ID),0)
+        self.date = Time(table[indx]["TIME"],format='mjd').iso[:10]
+        
         for instr in self.instruments:
             self.obs_files[instr] = {}
             self.regions[instr] = {}
 
         self.energybands = [[3.0, 10.0], [10.0, 79.0]]
-        self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(np.array(self.energybands).flatten())]
+        self.energy_range = [np.min(np.array(self.energybands).flatten()), np.max(
+            np.array(self.energybands).flatten())]
 
         self.check_repertories(path)
         self.replot = True
@@ -82,15 +91,15 @@ class ObservationNuSTAR:
         """
         print(f'<  INFO  > : Selection of source and background regions with ds9')
 
-        for instr in self.instruments:
-
-            self.obs_files[instr]["image"] = f"{self.workdir}/nu{self.ID}{instr[-1]}01_cl.evt"
-
+        for i,instr in enumerate(self.instruments):
             print(f'\t<  INFO  > : Processing instrument : {instr}')
-            try:
-                python_ds9.set("regions select all")
-            except:
-                python_ds9 = start_ds9()
+            if i ==0 :
+                try:
+                    python_ds9.set("regions select all")
+                except:
+                    python_ds9 = start_ds9()
+                    
+            self.obs_files[instr]["image"] = f"{self.workdir}/nu{self.ID}{instr[-1]}01_cl.evt"
 
             python_ds9.set("regions select all")
             python_ds9.set("regions delete")
@@ -98,28 +107,64 @@ class ObservationNuSTAR:
             python_ds9.set("scale asinh")
             python_ds9.set("cmap b")
 
-            if len(glob.glob(f"{self.workdir}/products/*.reg")) != 4:
+            if len(glob.glob(f"{self.workdir}/products/*{instr}.reg")) != 2:
                 print(
-                    f"Draw FIRST the region for the source save it as a src_{instr}.reg and bkg_{instr}.reg in the products folder")
+                    f"Draw FIRST the region for the source save it as a src_{instr}.reg and bkg_{instr}.reg and THEN the background")
                 input("Press Enter to continue...")
                 python_ds9.set("regions edit yes")
                 python_ds9.set("regions format ciao")
                 python_ds9.set("regions system physical")
 
             python_ds9.set("zoom to fit")
+            # python_ds9.set(
+                # f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
+    def extract_events(self,src_name):
+        """Extract event files for source and background"""
+        print('<  INFO  > : Generating event files')
+        for instr in self.instruments:
+            print(f'\t<  INFO  > : Processing instrument : {instr}')
             # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
-    def gen_lightcurves(self, src_name):
+            if len(glob.glob(f"{self.workdir}/products/{src_name}_evts_*_{instr}.fits"))!=2:
+                print(f'\t\t<  INFO  > : Extracting source and background events')
+
+                evts_src_name = f"{self.workdir}/products/{src_name}_evts_src_{instr}.fits"
+                evts_bkg_name = f"{self.workdir}/products/{src_name}_evts_bkg_{instr}.fits"
+
+                if glob.glob(evts_src_name) == []:
+                    hsp.extractor(
+                    filename=f"nu{self.ID}A01_cl.evt", 
+                    eventsout=evts_src_name,
+                    regionfile=f"src_{instr}.reg",
+                    imgfile='NONE',fitsbinlc='NONE',
+                    binlc=500.0,
+                    phafile='NONE',fitsbinpha='NONE',
+                    timefile='NONE',xcolf='X', xcolh='X',ycolf='Y', ycolh='Y',
+                    polwcol='NONE',stokes='NONE',tcol='TIME', ecol='PI'
+                    );
+                
+                if glob.glob(evts_bkg_name) == []:
+                    hsp.extractor(
+                    filename=f"nu{self.ID}A01_cl.evt", 
+                    eventsout=evts_bkg_name,
+                    regionfile=f"bkg_{instr}.reg",
+                    imgfile='NONE',fitsbinlc='NONE',
+                    binlc=500.0,
+                    phafile='NONE',fitsbinpha='NONE',
+                    timefile='NONE',xcolf='X', xcolh='X',ycolf='Y', ycolh='Y',
+                    polwcol='NONE',stokes='NONE',tcol='TIME', ecol='PI'
+                    );
+            else:
+                print(f'\t\t<  INFO  > : Source and background events already extracted')
+
+                    
+
+    def gen_lightcurves(self, src_name,bintime=500,correctlc=False):
         """
         Generate light curves for source and background for all energy bands
         Generate background subtracted light-curve
         """
-        self.nobin = False
-        if self.nobin:
-            tag = "nobin"
-        else:
-            tag = ""
-            binsize = {"FPMA": 1000, "FPMB": 1000}
+        tag = f"_{bintime}"
 
         print('<  INFO  > : Generating light-curves')
         for instr in self.instruments:
@@ -133,6 +178,27 @@ class ObservationNuSTAR:
                     print(
                         f'\t\t<  INFO  > : Generate src and bkg light curves {low}-{up} keV')
 
+
+            if len(glob.glob(f"{self.workdir}/products/*{src_name}_{instr}*lc_*")) != len(self.energybands):
+                for energy_range in self.energybands:
+                    low, up = energy_range
+                    lc_src_name = f"{self.workdir}/{self.ID}_{src_name}_{instr}_lc{tag}_src_{low}-{up}.fits"
+                    lc_bkg_name = f"{self.workdir}/{self.ID}_{src_name}_{instr}_lc{tag}_bkg_{low}-{up}.fits"
+
+                    if glob.glob(lc_src_name) == [] or glob.glob(lc_bkg_name) == []:
+                        print(
+                            f'\t\t<  INFO  > : Generate src and bkg light curves {low}-{up} keV')
+
+                        os.system(f"""nuproducts indir='{self.workdir}' outdir='{self.workdir}/products' \
+                            srcregionfile='{self.workdir}/products/src_{instr}.reg' \
+                            bkgregionfile='{self.workdir}/products/bkg_{instr}.reg' \
+                            correctlc='{"yes" if correctlc else "no"}' \
+                            instrument='{instr}' steminputs='nu{self.ID}' pilow='{int(energy2nustarchannel(low))}'  \
+                            pihigh='{int(energy2nustarchannel(up))}'  binsize={bintime}   \
+                            lcfile='{lc_src_name}' bkglcfile='{lc_bkg_name}'  \
+                            imagefile=None runmkarf=no runmkrmf=no bkgphafile=NONE phafile=NONE 2>&1  | tee '{self.logdir}/nuproducts_{instr}_{low}_{up}.txt' """)
+        self.plot_light_curves(src_name,tag)
+
                     os.system(f"""nuproducts indir='{self.workdir}' outdir='{self.workdir}/products' \
                         srcregionfile='{self.workdir}/products/src_{instr}.reg' \
                         bkgregionfile='{self.workdir}/products/bkg_{instr}.reg' \
@@ -142,27 +208,22 @@ class ObservationNuSTAR:
                         imagefile=None runmkarf=no runmkrmf=no bkgphafile=NONE phafile=NONE 2>&1  | tee '{self.logdir}/nuproducts_{instr}_{low}_{up}.txt' """)
         self.plot_light_curves(src_name)
 
-    def plot_light_curves(self, src_name):
+    def plot_light_curves(self, src_name,tag):
         """
         Plot light_curves
 
         """
 
-        if self.nobin:
-            tag = "nobin"
-        else:
-            tag = ""
-
         fig, ax = plt.subplots(2, 1, figsize=(8, 9))
         workdir = f"{self.workdir}/products/"
         for j, (axis, energies) in enumerate(zip(ax, self.energybands)):
             if j == 0:
-                axis.set_title(r"\textbf{"+self.date+"}")
+                axis.set_title(self.date)
             low, up = energies
             for instr in self.instruments:
+                lc_src_name = f"{workdir}/{self.ID}_{src_name}_{instr}_lc{tag}_src_{low}-{up}.fits"
+                lc_bkg_name = f"{workdir}/{self.ID}_{src_name}_{instr}_lc{tag}_bkg_{low}-{up}.fits"
 
-                lc_src_name = f"{self.workdir}/products/{self.ID}_{src_name}{instr}_lc{tag}_src_{low}-{up}.fits"
-                lc_bkg_name = f"{self.workdir}/products/{self.ID}_{src_name}{instr}_lc{tag}_bkg_{low}-{up}.fits"
                 hdu_list_src = fits.open(lc_src_name)
                 hdu_list_bkg = fits.open(lc_bkg_name)
                 lc_data_src = hdu_list_src[1].data
@@ -177,8 +238,7 @@ class ObservationNuSTAR:
                 axis.errorbar(lc_data_src["TIME"]/1000, lc_data_clean,
                               yerr=lc_data_clean_error, fmt="o", markersize=5., color=col, label=instr)
             label = f"{int(low)}-{int(up)}"
-            axis.set_ylabel(r"\textbf{"+f"{label} keV"+"}" +
-                            "\n"+"Rate "+r"$\mathrm{(count}~\mathrm{s}^{-1})$")
+            axis.set_ylabel(f"{label} keV" + "\n"+"Rate "+r"$\mathrm{(count}~\mathrm{s}^{-1})$")
             axis.grid()
             ax[0].set_xticklabels([])
             axis.set_xlabel("Time (ks)")

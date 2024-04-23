@@ -3,7 +3,6 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import date
-
 from astropy.wcs import WCS
 from regions import Regions
 from matplotlib.colors import LogNorm
@@ -121,6 +120,8 @@ class ObservationXMM:
 
         self.obs_files = {}
         self.regions = {}
+        from pysas.wrapper import Wrapper as w
+
 
         for instr in self.instruments:
             self.obs_files[instr] = {}
