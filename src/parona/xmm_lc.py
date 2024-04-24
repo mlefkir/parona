@@ -1,6 +1,294 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
+from .utils import energy2nustarchannel, nustarchannel2energy
+
+def get_lightcurve_add_NuSTAR(
+    src_event_files,
+    bkg_event_files,
+    scales,
+    user_defined_bti=None,
+    verbose=False,
+    min_Frac_EXP=0.3,
+    input_timebin_size=50,
+    PATTERN=4,
+    PI=[200, 10000],
+    t_clip_start=10,
+    t_clip_end=100,
+    suffix="",
+):
+    """
+
+    Parameters
+    ----------
+    src_event_file : list of str
+        Paths to the source event files.
+    bkg_event_file : str or list of str
+        Paths to the background event files.
+    scales : list of float
+        Scale factor to apply to the background.
+    user_defined_bti : array
+        User defined bad time intervals.
+    verbose : bool
+        Verbose mode.
+    min_Frac_EXP : float
+        Minimum fraction of exposure to consider a bin good.
+    CCDNR : int,str
+        CCD number. Default is 4 for pn.
+    input_timebin_size : float
+        Time bin size in seconds.
+    PATTERN : int
+        Pattern to use. Default is <=4.
+    PI : list
+        PI range to use. Default is [200,10000].
+    t_clip_start : float
+        Time to clip the start of the light curve in seconds. Default is 10.
+    t_clip_end : float
+        Time to clip the end of the light curve in seconds. Default is 100.
+
+
+    Returns
+    -------
+    t : array
+        Array of the time at the start of each time bin
+    net : array
+        Array of the net counts in each time bin
+    err : array
+        Array of the error on the net counts in each time bin
+    bg : array
+        Array of the background counts in each time bin
+    bg_err : array
+        Array of the error on the background counts in each time bin
+    T0 : float
+        Starting time of the observation
+
+    """
+    # input_timebin_size  in s is the time bin size for the light curve chosen by the user
+    CCDNR = ""
+
+    hdu = [fits.open(src_evt) for src_evt in src_event_files]
+
+    FRAME_TIME = 0.1  # in ms
+    N_frames_per_bin = np.ceil(input_timebin_size * 1000 / FRAME_TIME).astype(
+        int
+    )  # integer number of frames per bin
+    timebin = N_frames_per_bin * FRAME_TIME / 1000  # s
+    if verbose:
+        print(f"N_frames_per_bin = {N_frames_per_bin}")
+    if verbose:
+        print(f"timebin = {timebin} s")
+
+    times = []
+    t_bins = []
+    counts = []
+    btis = []
+    frac_exposures = []
+    clean_frac_exposures = []
+    T0 = 0
+
+    # find the first instrument to start the observation
+    first_instr = 0
+    t_start = [
+        fits.open(src_event_files[i])["EVENTS"].header["TSTART"]
+        for i in range(len(src_event_files))
+    ]
+    t_stop = [
+        fits.open(src_event_files[i])["EVENTS"].header["TSTOP"]
+        for i in range(len(src_event_files))
+    ]
+    # define the start and end of the observation as the minimum and maximum of the start and stop times
+    t0 = np.max(t_start)
+    tm = np.min(t_stop)
+    t_start = t0 + t_clip_start
+    t_end = tm - t_clip_end
+    bin_list = np.arange(t_start, t_end, timebin)
+
+    for iter, item in enumerate(src_event_files + bkg_event_files):
+        hdu = fits.open(item)
+        if verbose:
+            print(f'Number of events = {len(hdu["EVENTS"].data)}')
+        event_table = hdu["EVENTS"].data
+
+        # mask for the pattern and the energy
+        pattern_name = "GRADE"
+
+        mask_PATTERN = event_table[pattern_name] <= PATTERN
+        mask_energy = (PI[0] < event_table["PI"]) & (event_table["PI"] < PI[1])
+        mask = mask_PATTERN & mask_energy
+
+        # apply the mask
+        event_table = event_table[mask]
+        if verbose:
+            print(f"Number of events after filtering = {len(event_table)}")
+        # get the time column
+        time = event_table["TIME"]
+
+        # get the counts in each bin
+        count, t_bin = np.histogram(
+            time, bins=bin_list, range=(t_start, t_end)
+        )  # counts and time at the start of each bin
+        if verbose:
+            print(f"Number of bins = {len(t_bin)-1}")
+        t = t_bin[:-1]  # remove the last element of the array
+
+        T0 = t[0]
+        if verbose:
+            print(f"T0 = {T0}")
+        t_bin = t_bin - T0
+
+        ## get the GTIs
+        GTI = hdu[f"STDGTI{CCDNR}"].data
+        if verbose:
+            print(f"Number of GTIs = {len(GTI)}")
+            # print(f"GTI start = {GTI['START']}")
+            # print(f"GTI stop = {GTI['STOP']}")
+            # print(f"GTI start - T0 = {GTI['START'] - T0}")
+        if len(GTI) == 1:
+            print("Only one good time interval")
+            if GTI["START"][0] < T0:
+                print("The start of the GTI is before the start of the observation")
+                if GTI["STOP"][0] > t[-1]:
+                    print("The GTI is longer than the observation")
+                    BTI = None
+                else:
+                    BTI = np.array([[GTI["STOP"][0] - T0, t[-1] - T0]])
+            else:
+                BTI = np.array(
+                    [[T0, GTI["START"][0] - T0], [GTI["STOP"][0] - T0, t[-1] - T0]]
+                )
+        else:
+            BTI = get_bad_time_intervals(GTI, T0)
+        if BTI is None:
+            Frac_EXP = np.ones(len(t))
+        else:
+            Frac_EXP = calculate_Frac_EXP(t_bin, BTI)
+
+        if np.any(Frac_EXP > 1) or np.any(Frac_EXP < 0):
+            raise ValueError("Frac_EXP should be between 0 and 1")
+
+        clean_Frac_EXP = np.where(Frac_EXP < min_Frac_EXP, 0, Frac_EXP)
+        clean_frac_exposures.append(clean_Frac_EXP)
+
+        times.append(t - T0)
+        counts.append(count)
+        frac_exposures.append(Frac_EXP)
+        btis.append(BTI)
+        t_bins.append(t_bin)
+
+    # for i, label in enumerate(["FPMA", "FPMB"]):
+
+    #     if btis[i] is None and btis[i + 2] is None:
+    #         btis_ = None
+    #     else:
+    #         btis_ = [btis[i], btis[i + 2]]
+    #     plot_raw_lc(
+    #         times[i],
+    #         [counts[i], counts[i + 2]],
+    #         [frac_exposures[i], frac_exposures[i + 2]],
+    #         btis_,
+    #         filename=f"raw_{label}_lc_{nustarchannel2energy(PI[0])}-{nustarchannel2energy(PI[1])}{suffix}",
+    #     )
+
+    src = []
+    bkg = []
+    src2 = []
+    bkg2 = []
+    clean_Frac_EXPs = []
+
+    # get the user defined bad time intervals
+    for i in range(2):
+        clean_Frac_EXP = np.minimum(
+            clean_frac_exposures[i], clean_frac_exposures[i + 2]
+        )
+
+        if user_defined_bti is not None:
+            raise NotImplementedError(
+                "User defined bad time intervals not implemented for NuSTAR"
+            )
+
+        # get the cleaned light curves and variance by rescaling the exposures
+        cleaned_src = np.divide(
+            counts[i].astype(float),
+            clean_Frac_EXP,
+            out=np.zeros_like(counts[i].astype(float)),
+            where=clean_Frac_EXP != 0,
+        )
+        cleaned_src2 = np.divide(
+            counts[i].astype(float),
+            clean_Frac_EXP**2,
+            out=np.zeros_like(counts[i].astype(float)),
+            where=clean_Frac_EXP != 0,
+        )
+
+        cleaned_bkg = np.divide(
+            counts[i + 2].astype(float),
+            clean_Frac_EXP,
+            out=np.zeros_like(counts[i + 2].astype(float)),
+            where=clean_Frac_EXP != 0,
+        )
+        cleaned_bkg2 = np.divide(
+            counts[i + 2].astype(float),
+            clean_Frac_EXP**2,
+            out=np.zeros_like(counts[i + 2].astype(float)),
+            where=clean_Frac_EXP != 0,
+        )
+
+        plot_raw_lc(
+            times[i],
+            [counts[i], counts[i + 2]],
+            [clean_Frac_EXP, clean_Frac_EXP],
+            None,
+            filename=f"user_lc_cleaned_{nustarchannel2energy(PI[0])}-{nustarchannel2energy(PI[1])}{suffix}",
+        )
+
+        if verbose:
+            print(
+                f"Min counts/bin in the src lc:",
+                np.min(np.delete(cleaned_src, np.where(cleaned_src <= 0))),
+            )
+
+        src.append(cleaned_src)
+        src2.append(cleaned_src2)
+        bkg.append(cleaned_bkg)
+        bkg2.append(cleaned_bkg2)
+        clean_Frac_EXPs.append(clean_Frac_EXP)
+
+    print()
+    dt = timebin
+    print(f"Number of bins before = {len(times)}")
+
+    # remove the bins with zero counts
+    zeros_index_FPMA = np.where(src[0] <= 0)
+    zeros_index_FPMB = np.where(src[1] <= 0)
+
+    src[0] = np.delete(src[0], zeros_index_FPMA)
+    src[1] = np.delete(src[1], zeros_index_FPMB)
+    bkg[0] = np.delete(bkg[0], zeros_index_FPMA)
+    bkg[1] = np.delete(bkg[1], zeros_index_FPMB)
+    src2[0] = np.delete(src2[0], zeros_index_FPMA)
+    src2[1] = np.delete(src2[1], zeros_index_FPMB)
+    bkg2[0] = np.delete(bkg2[0], zeros_index_FPMA)
+    bkg2[1] = np.delete(bkg2[1], zeros_index_FPMB)
+    mask = np.unique(np.concatenate([zeros_index_FPMA, zeros_index_FPMB]))
+
+    t = np.delete(times[0], mask)
+
+    if verbose:
+        print(f"Number of bins after = {len(t)}")
+
+    # scale the background
+    bkg[0] = bkg[0] * scales[0]
+    bkg2[0] = bkg2[0] * scales[0] ** 2
+    bkg[1] = bkg[1] * scales[1]
+    bkg2[1] = bkg2[1] * scales[1] ** 2
+
+    # get the net counts and error
+    net = (src[0] + src[1] - bkg[0] - bkg[1]) / dt
+    err = np.sqrt(src2[0] + src2[1] + bkg2[0] + bkg2[1]) / dt
+    bg = (bkg[0] + bkg[1]) / dt
+    bg_err = np.sqrt(bkg2[0] + bkg2[1]) / dt
+
+    return t, net, err, bg, bg_err, t_bin, clean_Frac_EXPs, T0
 
 
 def get_lightcurve(

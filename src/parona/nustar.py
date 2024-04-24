@@ -8,7 +8,7 @@ from astroquery.heasarc import Heasarc
 from astropy.time import Time
 import heasoftpy as hsp
 
-from .xmm_lc import get_lightcurve
+from .xmm_lc import get_lightcurve, get_lightcurve_add_NuSTAR
 from .utils import energy2nustarchannel, nustarchannel2energy
 
 
@@ -210,6 +210,93 @@ class ObservationNuSTAR:
                 print(
                     f"\t\t<  INFO  > : Source and background events already extracted"
                 )
+                
+    def gen_lightcurves_manual_combine(self, src_name,energies=[[3.0,10.0],[10.0,79.0]],input_timebin_size=500):
+        """
+        Generate light curves for source and background for all energy bands
+        Generate background subtracted light-curve
+        """
+        scales = []
+        src_event_files, bkg_event_files = [], []
+        
+        print('<  INFO  > : Generating light-curves')
+        
+        for instr in self.instruments:
+            print(f'\t<  INFO  > : Processing instrument : {instr}')
+            
+            evts_src_name = f"{self.workdir}/products/{src_name}_evts_src_{instr}.fits"
+            evts_bkg_name = f"{self.workdir}/products/{src_name}_evts_bkg_{instr}.fits"
+            spec_src_name = f"{self.workdir}/products/{src_name}_spec_src_{instr}.fits"
+            spec_bkg_name = f"{self.workdir}/products/{src_name}_spec_bkg_{instr}.fits"
+                
+            src_backscal = fits.open(spec_src_name)["SPECTRUM"].header["BACKSCAL"]
+            bkg_backscal = fits.open(spec_bkg_name)["SPECTRUM"].header["BACKSCAL"]
+            
+            scale = src_backscal/bkg_backscal
+                    
+            src_event_files.append(evts_src_name)
+            bkg_event_files.append(evts_bkg_name)
+            scale = src_backscal / bkg_backscal
+            scales.append(scale)
+        
+        for en in energies:
+            print(f"\t<  INFO  > : Processing energy range : {en[0]}-{en[1]} keV")
+
+            PI_min = np.rint(energy2nustarchannel(en[0])).astype(int)
+            PI_max = np.rint(energy2nustarchannel(en[1])).astype(int)
+            print(f"\t\t<  INFO  > : PI_min : {PI_min} PI_max : {PI_max}")
+        
+            t, net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0 = get_lightcurve_add_NuSTAR(
+                src_event_files,
+                bkg_event_files,
+                scales,
+                user_defined_bti=None,
+                verbose=True,
+                min_Frac_EXP=0.3,
+                input_timebin_size=input_timebin_size,
+                PATTERN=4,
+                PI=[PI_min, PI_max],
+                t_clip_start=10,
+                t_clip_end=100,suffix='total')
+
+            arr = np.array([t, net, err, bg, bg_err], dtype=float).T
+            frac = np.array([t_bin[:-1], clean_Frac_EXP[0],clean_Frac_EXP[1]], dtype=float).T
+            print(en)
+            np.savetxt(
+                f"{src_name}_total_{self.ID}_lc_{en[0]}-{en[1]}.txt",
+                arr,
+                header=f"T0 (TT): {T0}" + "\nNuSTAR FPMA+FPMB light curve" + "\ntime net err bg bg_err",
+            )
+            np.savetxt(
+                f"{src_name}_total_{self.ID}_{en[0]}-{en[1]}_frac.txt",
+                frac,
+                header=f"T0: {T0}" + "\ntime clean_Frac_EXP(FPMA) clean_Frac_EXP(FPMB)",
+            )
+
+            fig, ax = plt.subplots(figsize=(15, 5))
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel("Rate (cts/s)")
+            ax.errorbar(
+                t, net, yerr=err, color="k", label="Net", fmt="o", ms=2, mfc="w"
+            )
+            ax.errorbar(
+                t,
+                bg,
+                yerr=bg_err,
+                color="r",
+                label="Background",
+                fmt="o",
+                ms=2,
+                mfc="w",
+            )
+            # ax[1].errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=3,mfc='w')
+            ax.legend()
+            fig.savefig(
+                f"lightcurve_total_{en[0]}-{en[1]}.png",
+                dpi=300,
+                bbox_inches="tight",
+            )
+            plt.close(fig)
 
     def gen_lightcurves_manual(
         self, src_name, energies=[[3.0, 10.0], [10.0, 79.0]], input_timebin_size=500
@@ -253,7 +340,7 @@ class ObservationNuSTAR:
                     PI=[PI_min, PI_max],
                     t_clip_start=10,
                     t_clip_end=100,
-                    suffix="",
+                    suffix=instr,
                     is_nustar=True,
                 )
 
