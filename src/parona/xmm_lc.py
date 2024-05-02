@@ -256,20 +256,24 @@ def get_lightcurve_add_NuSTAR(
     print()
     dt = timebin
     print(f"Number of bins before = {len(times)}")
-
+    print(f"number of bins in src FPMA = {len(src[0])}")
+    print(f"number of bins in src FPMB = {len(src[1])}")
+    
     # remove the bins with zero counts
-    zeros_index_FPMA = np.where(src[0] <= 0)
-    zeros_index_FPMB = np.where(src[1] <= 0)
-
-    src[0] = np.delete(src[0], zeros_index_FPMA)
-    src[1] = np.delete(src[1], zeros_index_FPMB)
-    bkg[0] = np.delete(bkg[0], zeros_index_FPMA)
-    bkg[1] = np.delete(bkg[1], zeros_index_FPMB)
-    src2[0] = np.delete(src2[0], zeros_index_FPMA)
-    src2[1] = np.delete(src2[1], zeros_index_FPMB)
-    bkg2[0] = np.delete(bkg2[0], zeros_index_FPMA)
-    bkg2[1] = np.delete(bkg2[1], zeros_index_FPMB)
+    zeros_index_FPMA = np.where(src[0] <= 0)[0]
+    zeros_index_FPMB = np.where(src[1] <= 0)[0]
     mask = np.unique(np.concatenate([zeros_index_FPMA, zeros_index_FPMB]))
+
+    src[0] = np.delete(src[0], mask)
+    src[1] = np.delete(src[1], mask)
+    bkg[0] = np.delete(bkg[0], mask)
+    bkg[1] = np.delete(bkg[1], mask)
+    src2[0] = np.delete(src2[0], mask)
+    src2[1] = np.delete(src2[1], mask)
+    bkg2[0] = np.delete(bkg2[0], mask)
+    bkg2[1] = np.delete(bkg2[1], mask)
+    # mask = np.unique(np.concatenate([zeros_index_FPMA.flatten(), zeros_index_FPMB.flatten()]))
+
 
     t = np.delete(times[0], mask)
 
