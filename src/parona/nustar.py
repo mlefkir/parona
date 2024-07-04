@@ -191,7 +191,7 @@ class ObservationNuSTAR:
                     lcfile=None bkglcfile=None imagefile=None rungrppha=no \
                     runmkarf=no runmkrmf=no \
                     bkgphafile=None \
-                    phafile='{spec_src_name}' 2>&1  | tee '{self.logdir}/nuproducts_bkg_spectra_{instr}.txt'"""
+                    phafile='{spec_src_name}' 2>&1  | tee '{self.logdir}/nuproducts_src_spectra_{instr}.txt'"""
                 )
             if not os.path.isfile(spec_bkg_name):
                 os.system(
@@ -203,7 +203,7 @@ class ObservationNuSTAR:
                     lcfile=None bkglcfile=None imagefile=None rungrppha=no \
                     runmkarf=no runmkrmf=no \
                     bkgphafile='{spec_bkg_name}' \
-                    phafile='None' 2>&1  | tee '{self.logdir}/nuproducts_src_spectra_{instr}.txt'"""
+                    phafile='None' 2>&1  | tee '{self.logdir}/nuproducts_bkg_spectra_{instr}.txt'"""
                 )
 
             else:
@@ -228,7 +228,10 @@ class ObservationNuSTAR:
             evts_bkg_name = f"{self.workdir}/products/{src_name}_evts_bkg_{instr}.fits"
             spec_src_name = f"{self.workdir}/products/{src_name}_spec_src_{instr}.fits"
             spec_bkg_name = f"{self.workdir}/products/{src_name}_spec_bkg_{instr}.fits"
-                
+            if not os.path.isfile(spec_src_name) or not os.path.isfile(spec_src_name) or not os.path.isfile(evts_src_name) or not os.path.isfile(evts_bkg_name):
+                print(f"\t\t<  INFO  > : Extracting source and background events again")
+                self.extract_events(src_name)
+            
             src_backscal = fits.open(spec_src_name)["SPECTRUM"].header["BACKSCAL"]
             bkg_backscal = fits.open(spec_bkg_name)["SPECTRUM"].header["BACKSCAL"]
             

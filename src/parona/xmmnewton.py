@@ -619,9 +619,7 @@ class ObservationXMM:
             )
             
         for i, img in enumerate(self.obs_files[instr]["image"]):
-            if len(self.obs_files[instr]["evts"]) > 1:
-                # print(self.regions[instr]["src"])
-                
+            if len(self.obs_files[instr]["evts"]) > 1:                
                 srcreg = str(self.regions[instr]["src"][i]).replace("circle","CIRCLE")
             else:
                 srcreg = self.regions[instr]["src"].replace("circle","CIRCLE")
