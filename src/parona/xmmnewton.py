@@ -593,10 +593,6 @@ class ObservationXMM:
                     python_ds9.set(
                         f"regions save {self.workdir}/plot_{instr}{suffix}.reg"
                     )
-
-                    python_ds9.set("regions edit yes")
-                    python_ds9.set("regions format ciao")
-                    python_ds9.set("regions system physical")
                     python_ds9.set("zoom to fit")
 
                 hdu = fits.open(self.obs_files[instr]["image"][j])[0]
@@ -609,6 +605,38 @@ class ObservationXMM:
                 plt.close(fig)
                 # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
+    def get_encircled_energy(self, src_name):
+        """
+        Compute the encircled energy fraction for the source region using eregionanalyse
+
+        The image file must be present in the workdir and the source region must be defined in the regions dictionary
+
+        """
+        print(f"<  INFO  > : Getting encircled energy")
+        for instr in self.instruments:
+            print(
+                f"\t<  INFO  > : Processing instrument : {instr} with {len(self.obs_files[instr]['evts'])} event lists"
+            )
+            
+        for i, img in enumerate(self.obs_files[instr]["image"]):
+            if len(self.obs_files[instr]["evts"]) > 1:
+                # print(self.regions[instr]["src"])
+                
+                srcreg = str(self.regions[instr]["src"][i]).replace("circle","CIRCLE")
+            else:
+                srcreg = self.regions[instr]["src"].replace("circle","CIRCLE")
+                
+            suffix = "" if i == 0 else f"_{i}"
+            inargs = [f"imageset={img}",
+                      f"""srcexp=(X,Y) IN {srcreg}""",
+                      "withoutputfile=yes",
+                      f"output={self.workdir}/{self.ID}_{src_name}_{instr}_encircled_energy{suffix}.txt",
+            ]
+            with open(f"{self.logdir}/{src_name}{instr}_encircled_energy{suffix}.log", "w+") as f:
+                with contextlib.redirect_stdout(f):
+                    w("eregionanalyse", inargs).run() 
+
+           
     def check_pileup(self, src_name, CCDNR=4):
         """
 
