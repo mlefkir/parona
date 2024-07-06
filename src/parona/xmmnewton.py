@@ -545,13 +545,22 @@ class ObservationXMM:
                         f"regions save {self.workdir}/plot_{instr}{suffix}.reg"
                     )
 
-                    np.savetxt(
+                    if len(self.obs_files[instr]["evts"]) > 1:
+                        np.savetxt(
+                        curr_file,
+                        np.array(
+                            [self.regions[instr]["src"][j], self.regions[instr]["bkg"][j]]
+                        ),
+                        fmt="%s",
+                        )
+                    else:
+                        np.savetxt(
                         curr_file,
                         np.array(
                             [self.regions[instr]["src"], self.regions[instr]["bkg"]]
                         ),
                         fmt="%s",
-                    )
+                        )
                     # doesn't work anymore, I don't know why...
                     # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
 
