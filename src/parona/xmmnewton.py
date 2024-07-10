@@ -297,7 +297,7 @@ class ObservationXMM:
                         )
                     else:
                         input_eventfile.append(buff[i])
-                elif "_U0" in res and os.path.getsize(res) / 1e6 > 50:
+                elif "_U0" in res and os.path.getsize(res) / 1e6 > 30:
                     input_eventfile.append(buff[i])
 
         return sorted(input_eventfile)
@@ -479,7 +479,7 @@ class ObservationXMM:
 
         """
         print(f"<  INFO  > : Selection of source and background regions with ds9")
-
+        load_any_reg = False
         for i, instr in enumerate(self.instruments):
             print(
                 f"\t<  INFO  > : Processing instrument : {instr} with {len(self.obs_files[instr]['evts'])} event lists"
@@ -492,20 +492,20 @@ class ObservationXMM:
 
                 self.obs_files[instr][
                     "positions"
-                ] = f"{self.workdir}/{self.ID}_{src_name}{instr}_positions.txt"
+                ] = f"{self.workdir}/{self.ID}_{src_name}_{instr}_positions.txt"
                 self.regions[instr]["src"] = ""
                 self.regions[instr]["bkg"] = ""
             for j, evts in enumerate(self.obs_files[instr]["evts"]):
                 suffix = "" if j == 0 else f"_{j}"
                 if len(self.obs_files[instr]["evts"]) > 1:
                     self.obs_files[instr]["positions"].append(
-                        f"{self.workdir}/{self.ID}_{src_name}{instr}_positions{suffix}.txt"
+                        f"{self.workdir}/{self.ID}_{src_name}_{instr}_positions{suffix}.txt"
                     )
                 curr_file = (
-                    f"{self.workdir}/{self.ID}_{src_name}{instr}_positions{suffix}.txt"
+                    f"{self.workdir}/{self.ID}_{src_name}_{instr}_positions{suffix}.txt"
                 )
                 if glob.glob(curr_file) == []:
-                    if i == 0:
+                    if load_any_reg:
                         try:
                             python_ds9.set("regions select all")
                         except:
@@ -568,6 +568,7 @@ class ObservationXMM:
                     print(
                         f"\t<  INFO  > : Reading regions from {self.obs_files[instr]['positions']}"
                     )
+                    load_any_reg = True
                     if len(self.obs_files[instr]["evts"]) == 1:
                         self.regions[instr]["src"], self.regions[instr]["bkg"] = (
                             np.genfromtxt(curr_file, dtype="str")
