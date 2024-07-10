@@ -13,7 +13,7 @@ from astropy.table import Table
 import contextlib
 import shutil
 from .callds9 import start_ds9
-from .xmm_lc import get_lightcurve
+from .xmm_lc import get_lightcurve,combine_lightcurves
 
 
 class ObservationXMM:
@@ -122,7 +122,6 @@ class ObservationXMM:
         self.regions = {}
         from pysas.wrapper import Wrapper as w
 
-
         for instr in self.instruments:
             self.obs_files[instr] = {}
             self.regions[instr] = {}
@@ -156,7 +155,7 @@ class ObservationXMM:
             ]
             os.environ["SAS_CCF"] = glob.glob(f"{self.workdir}/ccf.cif")[0]
             os.environ["SAS_ODF"] = glob.glob(f"{self.workdir}/*SUM.SAS")[0]
-        
+
             # with open(f"{self.logdir}/startsas_bis.log", "w+") as f:
             #     with contextlib.redirect_stdout(f):
             #         w("startsas", inargs).run()
@@ -547,19 +546,22 @@ class ObservationXMM:
 
                     if len(self.obs_files[instr]["evts"]) > 1:
                         np.savetxt(
-                        curr_file,
-                        np.array(
-                            [self.regions[instr]["src"][j], self.regions[instr]["bkg"][j]]
-                        ),
-                        fmt="%s",
+                            curr_file,
+                            np.array(
+                                [
+                                    self.regions[instr]["src"][j],
+                                    self.regions[instr]["bkg"][j],
+                                ]
+                            ),
+                            fmt="%s",
                         )
                     else:
                         np.savetxt(
-                        curr_file,
-                        np.array(
-                            [self.regions[instr]["src"], self.regions[instr]["bkg"]]
-                        ),
-                        fmt="%s",
+                            curr_file,
+                            np.array(
+                                [self.regions[instr]["src"], self.regions[instr]["bkg"]]
+                            ),
+                            fmt="%s",
                         )
                     # doesn't work anymore, I don't know why...
                     # python_ds9.set(f"saveimage png {self.plotdir}/{self.ID}_{src_name}{instr}_image.png")
@@ -627,24 +629,26 @@ class ObservationXMM:
             print(
                 f"\t<  INFO  > : Processing instrument : {instr} with {len(self.obs_files[instr]['evts'])} event lists"
             )
-            
-        for i, img in enumerate(self.obs_files[instr]["image"]):
-            if len(self.obs_files[instr]["evts"]) > 1:                
-                srcreg = str(self.regions[instr]["src"][i]).replace("circle","CIRCLE")
-            else:
-                srcreg = self.regions[instr]["src"].replace("circle","CIRCLE")
-                
-            suffix = "" if i == 0 else f"_{i}"
-            inargs = [f"imageset={img}",
-                      f"""srcexp=(X,Y) IN {srcreg}""",
-                      "withoutputfile=yes",
-                      f"output={self.workdir}/{self.ID}_{src_name}_{instr}_encircled_energy{suffix}.txt",
-            ]
-            with open(f"{self.logdir}/{src_name}{instr}_encircled_energy{suffix}.log", "w+") as f:
-                with contextlib.redirect_stdout(f):
-                    w("eregionanalyse", inargs).run() 
 
-           
+        for i, img in enumerate(self.obs_files[instr]["image"]):
+            if len(self.obs_files[instr]["evts"]) > 1:
+                srcreg = str(self.regions[instr]["src"][i]).replace("circle", "CIRCLE")
+            else:
+                srcreg = self.regions[instr]["src"].replace("circle", "CIRCLE")
+
+            suffix = "" if i == 0 else f"_{i}"
+            inargs = [
+                f"imageset={img}",
+                f"""srcexp=(X,Y) IN {srcreg}""",
+                "withoutputfile=yes",
+                f"output={self.workdir}/{self.ID}_{src_name}_{instr}_encircled_energy{suffix}.txt",
+            ]
+            with open(
+                f"{self.logdir}/{src_name}{instr}_encircled_energy{suffix}.log", "w+"
+            ) as f:
+                with contextlib.redirect_stdout(f):
+                    w("eregionanalyse", inargs).run()
+
     def check_pileup(self, src_name, CCDNR=4):
         """
 
@@ -1062,6 +1066,7 @@ class ObservationXMM:
         verbose=False,
         min_Frac_EXP=0.3,
         CCDNR=4,
+        CCDNR_bkg=4,
         PATTERN=4,
         PI=[200, 10000],
         t_clip_start=10,
@@ -1095,14 +1100,24 @@ class ObservationXMM:
 
         """
         src_name += "_"
-        print(f"\t<  INFO  > : Generating light-curves manually")
-        for instr in self.instruments:
+        print(f"<  INFO  > : Generating light-curves manually")
+        for iter, instr in enumerate(self.instruments):
+
+            if isinstance(CCDNR, list):
+                assert len(CCDNR) == len(
+                    self.instruments
+                ), "CCDNR must be a list with the same length as the number of instruments"
+                CCDNR_s = CCDNR[iter]
+                CCDNR_b = CCDNR_bkg[iter]
+            else:
+                CCDNR_s = CCDNR
+                CCDNR_b = CCDNR_bkg
+
             print(f"\t<  INFO  > : Processing instrument : {instr}")
             print(
                 f"\t<  INFO  > : Number of event files : {len(self.obs_files[instr]['evts'])}"
             )
             for ne, event_file in enumerate(self.obs_files[instr]["evts"]):
-                print(PI)
                 print(f"\t<  INFO  > : Processing event file : {event_file}, ne={ne}")
                 if ne == 0:
                     suffix = ""
@@ -1113,8 +1128,8 @@ class ObservationXMM:
                 if instr == "EPN":
                     expression = "#XMMEA_EP && FLAG == 0"
                 else:
-                    raise NotImplementedError("Only EPN implemented")
-                    # expression = "#XMMEA_EM && FLAG == 0"
+                    # raise NotImplementedError("Only EPN implemented")
+                    expression = "#XMMEA_EM"  # && FLAG == 0"
 
                 # generate a barely filtered event file
                 inargs = [
@@ -1154,18 +1169,18 @@ class ObservationXMM:
                     f"The source events are located on CCD: {np.unique(src_hdu['EVENTS'].data['CCDNR'])}"
                 )
 
-                if not np.all(src_hdu["EVENTS"].data["CCDNR"] == 4.0):
+                if not np.all(src_hdu["EVENTS"].data["CCDNR"] == np.float64(CCDNR_s)):
                     raise ValueError(
-                        "Not all events are in the CCDNR 4 in the source event file"
+                        f"Not all events are in the CCDNR {CCDNR_s} in the source event file, they are on {np.unique(src_hdu['EVENTS'].data['CCDNR'])}"
                     )
                 bkg_hdu = fits.open(bkg_event_file)
                 print(
-                    f"The background events are located on CCD: {np.unique(bkg_hdu['EVENTS'].data['CCDNR'])}"
+                    f"The background events are located on CCD: {np.unique(bkg_hdu['EVENTS'].data['CCDNR'])}, should be {CCDNR_b}"
                 )
-                if not np.all(bkg_hdu["EVENTS"].data["CCDNR"] == 4.0):
+                if not np.all(bkg_hdu["EVENTS"].data["CCDNR"] == np.float64(CCDNR_b)):
                     print(np.unique(bkg_hdu["EVENTS"].data["CCDNR"]))
                     raise ValueError(
-                        "Not all events are in the CCDNR 4 in the background event file"
+                        f"Not all events are in the CCDNR {CCDNR_b} in the background event file"
                     )
 
                 # get the backscale value
@@ -1178,25 +1193,38 @@ class ObservationXMM:
                 else:
                     energies = PI
 
-                for pi in energies:
+                for iter_pi,pi in enumerate(energies):
                     print(
                         f"\t<  INFO  > : Processing energy range : {pi[0]/1000}-{pi[1]/1000} keV"
                     )
+                    if iter == 0 and iter_pi == 0:
+                        buff = None
+                        outbin = None
+                    elif iter == 0 and iter_pi == 1:
+                        outbin = timebin
+                        buff = np.copy(bin_list)
+                        
 
-                    t, net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0 = get_lightcurve(
-                        src_event_file,
-                        bkg_event_file,
-                        scale,
-                        user_defined_bti=user_defined_bti,
-                        verbose=verbose,
-                        min_Frac_EXP=min_Frac_EXP,
-                        CCDNR=CCDNR,
-                        input_timebin_size=binning,
-                        PATTERN=PATTERN,
-                        PI=pi,
-                        t_clip_start=t_clip_start,
-                        t_clip_end=t_clip_end,
-                        suffix=suffix,
+                    t, net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0, bin_list,timebin = (
+                        get_lightcurve(
+                            src_event_file,
+                            bkg_event_file,
+                            scale,
+                            user_defined_bti=user_defined_bti,
+                            verbose=verbose,
+                            min_Frac_EXP=min_Frac_EXP,
+                            CCDNR=CCDNR_s,
+                            CCDNR_bkg=CCDNR_b,
+                            input_timebin_size=binning,
+                            PATTERN=PATTERN,
+                            PI=pi,
+                            bin_list=buff,
+                            t_clip_start=t_clip_start,
+                            t_clip_end=t_clip_end,
+                            suffix=suffix,
+                            instr=instr,
+                            timebin=outbin
+                        )
                     )
 
                     # save the lightcurve
@@ -1233,12 +1261,66 @@ class ObservationXMM:
                     # ax[1].errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=3,mfc='w')
                     ax.legend()
                     fig.savefig(
-                        f"lightcurve_{pi[0]/1000}-{pi[1]/1000}{suffix}.png",
+                        f"lightcurve_{instr}_{pi[0]/1000}-{pi[1]/1000}{suffix}.png",
                         dpi=300,
                         bbox_inches="tight",
                     )
                     plt.close(fig)
-
+        
+        # combine the light curves if needed
+        if len(self.instruments)>=1:
+            print(f"<  INFO  > : Combining light curves")
+            for iter_pi, pi in enumerate(energies):
+                times = []
+                counts = []
+                errors= []
+                bkg_counts = []
+                bkg_errors = []
+                T0 = []
+                for instr in self.instruments:
+                    t, net, err, bg, bg_err = np.loadtxt(
+                        f"{src_name}{instr}_{self.ID}_lc_{pi[0]/1000}-{pi[1]/1000}.txt",
+                        unpack=True,
+                    )
+                    times.append(t)
+                    counts.append(net)
+                    errors.append(err)
+                    bkg_counts.append(bg)
+                    bkg_errors.append(bg_err)
+                    T0.append(t[0])
+                t,net,err,bg, bg_err,T0 = combine_lightcurves(times,counts,errors,bkg_counts,bkg_errors,T0)
+                arr = np.array([t, net, err, bg, bg_err], dtype=float).T
+                np.savetxt(
+                        f"{src_name}combined_{self.ID}_lc_{pi[0]/1000}-{pi[1]/1000}{suffix}.txt",
+                        arr,
+                        header=f"T0 (TT): {T0}" + "\n"+ f"{self.instruments}" + "\ntime net err bg bg_err")
+                
+                fig, ax = plt.subplots(figsize=(15, 5))
+                ax.set_xlabel("Time (s)")
+                ax.set_ylabel("Rate (cts/s)")
+                ax.errorbar(
+                    t, net, yerr=err, color="k", label="Net", fmt="o", ms=2, mfc="w"
+                )
+                ax.errorbar(
+                    t,
+                    bg,
+                    yerr=bg_err,
+                    color="r",
+                    label="Background",
+                    fmt="o",
+                    ms=2,
+                    mfc="w",
+                )
+                title = f"{self.instruments}".replace("[","").replace("]","").replace("'","").replace(",","+")
+                ax.set_title(title)
+                # ax[1].errorbar(t,bg,yerr=bg_err,color='r',label='Background',fmt='o',ms=3,mfc='w')
+                ax.legend()
+                fig.savefig(
+                    f"lightcurve_combined_{pi[0]/1000}-{pi[1]/1000}{suffix}.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+                plt.close(fig)
     def RGS_disp(self):
         """    
         

@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from .utils import energy2nustarchannel, nustarchannel2energy
 
+
 def get_lightcurve_add_NuSTAR(
     src_event_files,
     bkg_event_files,
@@ -258,7 +259,7 @@ def get_lightcurve_add_NuSTAR(
     print(f"Number of bins before = {len(times)}")
     print(f"number of bins in src FPMA = {len(src[0])}")
     print(f"number of bins in src FPMB = {len(src[1])}")
-    
+
     # remove the bins with zero counts
     zeros_index_FPMA = np.where(src[0] <= 0)[0]
     zeros_index_FPMB = np.where(src[1] <= 0)[0]
@@ -273,7 +274,6 @@ def get_lightcurve_add_NuSTAR(
     bkg2[0] = np.delete(bkg2[0], mask)
     bkg2[1] = np.delete(bkg2[1], mask)
     # mask = np.unique(np.concatenate([zeros_index_FPMA.flatten(), zeros_index_FPMB.flatten()]))
-
 
     t = np.delete(times[0], mask)
 
@@ -303,13 +303,17 @@ def get_lightcurve(
     verbose=False,
     min_Frac_EXP=0.3,
     CCDNR=4,
+    CCDNR_bkg=4,
     input_timebin_size=50,
+    bin_list=None,
+    timebin=None,
     PATTERN=4,
     PI=[200, 10000],
     t_clip_start=10,
     t_clip_end=100,
     suffix="",
     is_nustar=False,
+    instr="",
 ):
     """
 
@@ -329,8 +333,14 @@ def get_lightcurve(
         Minimum fraction of exposure to consider a bin good.
     CCDNR : int,str
         CCD number. Default is 4 for pn.
+    CCDNR_bkg : int,str
+        CCD number for the background. Default is 4 for pn.
     input_timebin_size : float
         Time bin size in seconds.
+    bin_list: array
+        Array of the time at the start of each time bin
+    timebin : float
+        Time bin size in seconds. Default is None as it is computed from the input_timebin_size.
     PATTERN : int
         Pattern to use. Default is <=4.
     PI : list
@@ -359,24 +369,27 @@ def get_lightcurve(
     """
     # input_timebin_size  in s is the time bin size for the light curve chosen by the user
     if isinstance(CCDNR, int):
-        CCDNR = f"{CCDNR:02d}"
+        curr_CCDNR = f"{CCDNR:02d}"
     if is_nustar:
         assert CCDNR == "", "CCDNR should be empty for NuSTAR"
 
     hdu = fits.open(src_event_file)
     if not is_nustar:
-        FRAME_TIME = hdu[f"STDGTI{CCDNR}"].header["FRMTIME"]  # in ms
+        FRAME_TIME = hdu[f"STDGTI{curr_CCDNR}"].header["FRMTIME"]  # in ms
     # in practice we want a timebinsize which is a multiple of the frame time
     else:
         FRAME_TIME = 0.1  # in ms
     N_frames_per_bin = np.ceil(input_timebin_size * 1000 / FRAME_TIME).astype(
         int
     )  # integer number of frames per bin
-    timebin = N_frames_per_bin * FRAME_TIME / 1000  # s
+    if timebin is None:
+        timebin = N_frames_per_bin * FRAME_TIME / 1000  # s
+    else:
+        print("\t\t<! WARNING !> Using the user defined timebin")
     if verbose:
-        print(f"N_frames_per_bin = {N_frames_per_bin}")
+        print(f"\t\t\tN_frames_per_bin = {N_frames_per_bin}")
     if verbose:
-        print(f"timebin = {timebin} s")
+        print(f"\t\t\ttimebin = {timebin} s")
 
     times = []
     t_bins = []
@@ -387,9 +400,16 @@ def get_lightcurve(
     T0 = 0
 
     for iter, item in enumerate([src_event_file, bkg_event_file]):
+
+        # set the CCDNR for the background or the source
+        if iter == 0:
+            curr_CCDNR = f"{CCDNR:02d}"
+        else:
+            curr_CCDNR = f"{CCDNR_bkg:02d}"
+
         hdu = fits.open(item)
         if verbose:
-            print(f'Number of events = {len(hdu["EVENTS"].data)}')
+            print(f'\t\t\tNumber of events = {len(hdu["EVENTS"].data)}')
         event_table = hdu["EVENTS"].data
 
         # mask for the pattern and the energy
@@ -404,21 +424,29 @@ def get_lightcurve(
         # apply the mask
         event_table = event_table[mask]
         if verbose:
-            print(f"Number of events after filtering = {len(event_table)}")
+            print(f"\t\t\tNumber of events after filtering = {len(event_table)}")
         # get the time column
         time = event_table["TIME"]
         # clip the start and the end of the light curve
         if iter == 0:  # for the source
-            t_start = time[0] + t_clip_start
-            t_end = time[-1] - t_clip_end
-            bin_list = np.arange(t_start, t_end, timebin)
+            if bin_list is not None:
+                print("\t\t<! WARNING !> Using the user defined bin_list")
+                t_start = bin_list[0]
+                t_end = bin_list[-1]
+                bin_list = bin_list
+            else:
+                t_start = time[0] + t_clip_start
+                t_end = time[-1] - t_clip_end
+                bin_list = np.arange(t_start, t_end, timebin)
+
         # get the counts in each bin
         count, t_bin = np.histogram(
             time, bins=bin_list, range=(t_start, t_end)
         )  # counts and time at the start of each bin
         if verbose:
-            print(f"Number of bins = {len(t_bin)-1}")
-        t = t_bin[:-1]  # remove the last element of the array
+            print(f"\t\t\tNumber of bins = {len(t_bin)-1}")
+            # print(f"t_bin[0]:{t_bin[0]}, time[0]:{time[0]},")
+        t = np.copy(t_bin)[:-1]  # remove the last element of the array
 
         T0 = t[0]
         if verbose:
@@ -426,9 +454,9 @@ def get_lightcurve(
         t_bin = t_bin - T0
 
         ## get the GTIs
-        GTI = hdu[f"STDGTI{CCDNR}"].data
+        GTI = hdu[f"STDGTI{curr_CCDNR}"].data
         if verbose:
-            print(f"Number of GTIs = {len(GTI)}")
+            print(f"\t\t\tNumber of GTIs = {len(GTI)}")
             # print(f"GTI start = {GTI['START']}")
             # print(f"GTI stop = {GTI['STOP']}")
             # print(f"GTI start - T0 = {GTI['START'] - T0}")
@@ -437,7 +465,7 @@ def get_lightcurve(
             if GTI["START"][0] < T0:
                 print("The start of the GTI is before the start of the observation")
                 if GTI["STOP"][0] > t[-1]:
-                    print("The GTI is longer than the observation")
+                    print("\t\t\tThe GTI is longer than the observation")
                     BTI = None
                 else:
                     BTI = np.array([[GTI["STOP"][0] - T0, t[-1] - T0]])
@@ -470,7 +498,7 @@ def get_lightcurve(
         counts,
         frac_exposures,
         btis,
-        filename=f"raw_lc_{PI[0]/1000}-{PI[1]/1000}{suffix}",
+        filename=f"raw_lc_{instr}_{PI[0]/1000}-{PI[1]/1000}{suffix}",
     )
     # get the user defined bad time intervals
     clean_Frac_EXP = np.minimum(clean_frac_exposures[0], clean_frac_exposures[1])
@@ -482,7 +510,7 @@ def get_lightcurve(
             counts,
             [frac_exp, frac_exp],
             [user_defined_bti, user_defined_bti],
-            filename=f"user_lc_{PI[0]/1000}-{PI[1]/1000}",
+            filename=f"user_lc_{instr}_{PI[0]/1000}-{PI[1]/1000}",
         )
 
         clean_Frac_EXP = np.where(clean_Frac_EXP < min_Frac_EXP, 0, clean_Frac_EXP)
@@ -522,7 +550,7 @@ def get_lightcurve(
         counts,
         [clean_Frac_EXP, clean_Frac_EXP],
         None,
-        filename=f"user_lc_cleaned_{PI[0]/1000}-{PI[1]/1000}{suffix}",
+        filename=f"user_lc_cleaned_{instr}_{PI[0]/1000}-{PI[1]/1000}{suffix}",
     )
 
     if verbose:
@@ -536,13 +564,13 @@ def get_lightcurve(
 
     dt = timebin
     # remove the bins with zero counts
-    zeros_index = np.where(src[0] <= 0)
+    # zeros_index = np.where(src[0] <= 0)
 
-    src[0] = np.delete(src[0], zeros_index)
-    src[1] = np.delete(src[1], zeros_index)
-    bkg[0] = np.delete(bkg[0], zeros_index)
-    bkg[1] = np.delete(bkg[1], zeros_index)
-    t = np.delete(times[0], zeros_index)
+    # src[0] = np.delete(src[0], zeros_index)
+    # src[1] = np.delete(src[1], zeros_index)
+    # bkg[0] = np.delete(bkg[0], zeros_index)
+    # bkg[1] = np.delete(bkg[1], zeros_index)
+    # t = np.delete(times[0], zeros_index)
 
     if verbose:
         print(f"Number of bins = {len(t)}")
@@ -557,7 +585,46 @@ def get_lightcurve(
     bg = bkg[0] / dt
     bg_err = np.sqrt(bkg[1]) / dt
 
-    return t, net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0
+    return times[0], net, err, bg, bg_err, t_bin, clean_Frac_EXP, T0, bin_list, timebin
+
+
+def combine_lightcurves(times, count_rates, errors, bkg_counts, bkg_errors, T0):
+    print("Combining light curves")
+    n = len(times)
+    assert n == len(
+        count_rates
+    ), "The number of time arrays and count rate arrays should be the same"
+    assert n == len(T0)
+    # first check that the time arrays are the same
+    for i in range(1, n):
+        if not np.allclose(times[0], times[i]):
+            raise ValueError("The time arrays are not the same")
+        if not np.allclose(T0[0], T0[i]):
+            raise ValueError("The starting times are not the same")
+    dt = times[0][1] - times[0][0]
+    net = np.zeros_like(times[0])
+    err = np.zeros_like(times[0])
+    bkg = np.zeros_like(times[0])
+    bkg_err = np.zeros_like(times[0])
+    
+    zeros_index = count_rates[0] <= 0
+
+    for i in range(n):
+        net += count_rates[i]
+        err += (errors[i] * dt) ** 2
+        bkg += bkg_counts[i]
+        bkg_err += (bkg_errors[i] * dt) ** 2
+        zeros_index = zeros_index|(count_rates[i] <= 0)
+
+    net = net[~zeros_index]
+    err = np.sqrt(err)[~zeros_index]/dt
+    bkg = bkg[~zeros_index]
+    bkg_err = np.sqrt(bkg_err)[~zeros_index]/dt
+    t = times[0][~zeros_index]
+    
+    # err = np.sqrt(err) / dt
+    # bkg_err = np.sqrt(bkg_err) / dt
+    return t, net, err, bkg, bkg_err, T0[0]
 
 
 def get_bad_time_intervals(gtis, T0):
