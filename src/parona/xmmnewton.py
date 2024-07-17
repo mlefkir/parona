@@ -478,7 +478,7 @@ class ObservationXMM:
 
         """
         print(f"<  INFO  > : Selection of source and background regions with ds9")
-        load_any_reg = False
+        load_any_reg = True
         for i, instr in enumerate(self.instruments):
             print(
                 f"\t<  INFO  > : Processing instrument : {instr} with {len(self.obs_files[instr]['evts'])} event lists"
@@ -509,7 +509,9 @@ class ObservationXMM:
                             python_ds9.set("regions select all")
                         except:
                             python_ds9 = start_ds9()
-
+                    else:
+                        python_ds9 = start_ds9()
+                        
                     python_ds9.set("regions select all")
                     python_ds9.set("regions delete")
                     python_ds9.set("file " + evts)
