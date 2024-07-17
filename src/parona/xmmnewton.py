@@ -1064,7 +1064,7 @@ class ObservationXMM:
         binning,
         user_defined_bti=None,
         verbose=False,
-        min_Frac_EXP=0.3,
+        min_Frac_EXP=0.7,
         CCDNR=4,
         CCDNR_bkg=4,
         PATTERN=4,
@@ -1268,7 +1268,7 @@ class ObservationXMM:
                     plt.close(fig)
         
         # combine the light curves if needed
-        if len(self.instruments)>=1:
+        if len(self.instruments)>1:
             print(f"<  INFO  > : Combining light curves")
             for iter_pi, pi in enumerate(energies):
                 times = []

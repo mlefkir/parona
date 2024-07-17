@@ -238,7 +238,7 @@ def get_lightcurve_add_NuSTAR(
             times[i],
             [counts[i], counts[i + 2]],
             [clean_Frac_EXP, clean_Frac_EXP],
-            None,
+            None,thresh=min_Frac_EXP,
             filename=f"user_lc_cleaned_{nustarchannel2energy(PI[0])}-{nustarchannel2energy(PI[1])}{suffix}",
         )
 
@@ -301,7 +301,7 @@ def get_lightcurve(
     scale,
     user_defined_bti=None,
     verbose=False,
-    min_Frac_EXP=0.3,
+    min_Frac_EXP=0.7,
     CCDNR=4,
     CCDNR_bkg=4,
     input_timebin_size=50,
@@ -434,6 +434,7 @@ def get_lightcurve(
                 t_start = bin_list[0]
                 t_end = bin_list[-1]
                 bin_list = bin_list
+                print(f"\t\t\tt_start = {t_start}, t_end = {t_end},timebin = {timebin}")
             else:
                 t_start = time[0] + t_clip_start
                 t_end = time[-1] - t_clip_end
@@ -497,7 +498,7 @@ def get_lightcurve(
         times[0],
         counts,
         frac_exposures,
-        btis,
+        btis,thresh=min_Frac_EXP,
         filename=f"raw_lc_{instr}_{PI[0]/1000}-{PI[1]/1000}{suffix}",
     )
     # get the user defined bad time intervals
@@ -510,6 +511,7 @@ def get_lightcurve(
             counts,
             [frac_exp, frac_exp],
             [user_defined_bti, user_defined_bti],
+            thresh=min_Frac_EXP,
             filename=f"user_lc_{instr}_{PI[0]/1000}-{PI[1]/1000}",
         )
 
@@ -549,7 +551,7 @@ def get_lightcurve(
         times[0],
         counts,
         [clean_Frac_EXP, clean_Frac_EXP],
-        None,
+        None,thresh=min_Frac_EXP,
         filename=f"user_lc_cleaned_{instr}_{PI[0]/1000}-{PI[1]/1000}{suffix}",
     )
 
@@ -679,8 +681,8 @@ def calculate_Frac_EXP(t_bin, btis, user_btis=False):
         else:
             lower = btis[i][0]
             higher = btis[i][1]
-        bti_start = np.searchsorted(t_bin, lower) - 1
-        bti_end = np.searchsorted(t_bin, higher) - 1
+        bti_start = np.searchsorted(t_bin, lower,side='right') - 1
+        bti_end = np.searchsorted(t_bin, higher,side='right') - 1
         bti_start = max(0, bti_start)
 
         if bti_end >= 0:
@@ -689,10 +691,10 @@ def calculate_Frac_EXP(t_bin, btis, user_btis=False):
             if size == 0:
                 Frac_EXP[bti_start] = Frac_EXP[bti_start] - (higher - lower)
             if size > 1:
-                Frac_EXP[bti_start + 1 : bti_end] = 0
+                Frac_EXP[bti_start + 1 : bti_end-1] = 0
             if size > 0:
                 Frac_EXP[bti_start] = Frac_EXP[bti_start] - (
-                    t_bin[bti_start + 1] - lower
+                    t_bin[bti_start ]+timebin - lower
                 )
                 Frac_EXP[bti_end] = Frac_EXP[bti_end] - (higher - t_bin[bti_end])
 
@@ -701,7 +703,7 @@ def calculate_Frac_EXP(t_bin, btis, user_btis=False):
     return Frac_EXP
 
 
-def plot_raw_lc(t, y, fr, btis, filename):
+def plot_raw_lc(t, y, fr, btis, filename,thresh=None):
     """Plot the raw light curve and the fraction of exposure
 
     Parameters
@@ -731,6 +733,8 @@ def plot_raw_lc(t, y, fr, btis, filename):
         ax[1].set_ylabel("Frac EXP")
         ax[1].legend()
         ax[1].set_title("Fraction of exposure")
+        if thresh is not None:
+            ax[1].axhline(thresh, color="k", linestyle="--", label="Threshold")
 
         ax[1].sharex(ax[0])
         if btis is not None:
