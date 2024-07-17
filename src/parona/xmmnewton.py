@@ -1086,7 +1086,7 @@ class ObservationXMM:
         verbose : bool, optional
             Verbose, by default False
         min_Frac_EXP : float, optional
-            Minimum fraction of exposure time, by default 0.3
+            Minimum fraction of exposure time, by default 0.7
         CCDNR : int, optional
             CCD number, by default 4, only for EPIC-PN
         PATTERN : int, optional

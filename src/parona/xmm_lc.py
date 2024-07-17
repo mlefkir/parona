@@ -10,7 +10,7 @@ def get_lightcurve_add_NuSTAR(
     scales,
     user_defined_bti=None,
     verbose=False,
-    min_Frac_EXP=0.3,
+    min_Frac_EXP=0.7,
     input_timebin_size=50,
     PATTERN=4,
     PI=[200, 10000],
