@@ -290,9 +290,9 @@ class ObservationXMM:
             input_eventfile = []
             for i, res in enumerate(buff):
                 if "_S0" in res or "_S" in res:
-                    if os.path.getsize(res) / 1e6 < 20:
+                    if os.path.getsize(res) / 1e6 < 15:
                         print(
-                            "<  WARNING  > : The event list is smaller than 20 MB, it will be ignored"
+                            "<  WARNING  > : The event list is smaller than 15 MB, it will be ignored"
                         )
                     else:
                         input_eventfile.append(buff[i])
@@ -1182,7 +1182,7 @@ class ObservationXMM:
                 if not np.all(bkg_hdu["EVENTS"].data["CCDNR"] == np.float64(CCDNR_b)):
                     print(np.unique(bkg_hdu["EVENTS"].data["CCDNR"]))
                     raise ValueError(
-                        f"Not all events are in the CCDNR {CCDNR_b} in the background event file"
+                        f"Not all events are in the CCDNR {CCDNR_b} in the background event file, they are on {np.unique(bkg_hdu['EVENTS'].data['CCDNR'])}"
                     )
 
                 # get the backscale value
@@ -1289,7 +1289,10 @@ class ObservationXMM:
                     errors.append(err)
                     bkg_counts.append(bg)
                     bkg_errors.append(bg_err)
-                    T0.append(t[0])
+                    f = open( f"{src_name}{instr}_{self.ID}_lc_{pi[0]/1000}-{pi[1]/1000}.txt")
+                    data = f.readlines()
+                    T0.append(float(data[0][11:-1]))
+                print("list of T0:",T0)
                 t,net,err,bg, bg_err,T0 = combine_lightcurves(times,counts,errors,bkg_counts,bkg_errors,T0)
                 arr = np.array([t, net, err, bg, bg_err], dtype=float).T
                 np.savetxt(
