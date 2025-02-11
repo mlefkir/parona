@@ -313,6 +313,7 @@ def get_lightcurve(
     t_clip_end=100,
     suffix="",
     is_nustar=False,
+    save_counts = True,
     instr="",
 ):
     """
@@ -573,6 +574,13 @@ def get_lightcurve(
     # bkg[0] = np.delete(bkg[0], zeros_index)
     # bkg[1] = np.delete(bkg[1], zeros_index)
     # t = np.delete(times[0], zeros_index)
+    
+    if save_counts:
+        data = np.array([times[0],src[0],bkg[0],clean_Frac_EXP]).T
+        header = f"T0:{T0}\ndt:{dt}\nScaling factor:{scale}\ntime src_counts bkg_counts frac_exp"
+        
+        np.savetxt(f"counts_{instr}_{PI[0]/1000}-{PI[1]/1000}{suffix}.txt",data,header=header)
+
 
     if verbose:
         print(f"Number of bins = {len(t)}")

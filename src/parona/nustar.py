@@ -76,7 +76,8 @@ class ObservationNuSTAR:
         Calibrate the data files with nupipeline
         """
         os.chdir(self.workdir)
-        if not len(glob.glob(f"{self.workdir}/*")) > 4:
+        if len(glob.glob(f"{self.workdir}/*")) < 4:
+            print(f"<  INFO  > : Calibrating NuSTAR data")
             os.system(
                 f"nupipeline indir='{self.datadir}' steminputs='nu{self.ID}' outdir='{self.workdir}' 2>&1  | tee '{self.logdir}/nupipeline.txt'"
             )
