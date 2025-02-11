@@ -1326,6 +1326,7 @@ class ObservationXMM:
                     bbox_inches="tight",
                 )
                 plt.close(fig)
+
     def RGS_disp(self):
         """    
         
@@ -1495,7 +1496,137 @@ class ObservationXMM:
                 fig.suptitle(f"Light curve RGS order{order}", fontsize=20)
                 fig.tight_layout()
                 fig.savefig(f"{self.plotdir}/{self.ID}_RGS_O{order}_lc.pdf")
+    
+    def gen_flarelc(self):
+        """
 
+        Generate the flare background rate file
+
+        """
+        print('<  INFO  > : Generating flares light curves') 
+
+        for instr in self.instruments:
+            
+            print(f'\t<  INFO  > : Processing instrument : {instr}') 
+            self.obs_files[instr]["flare"] = []
+                    
+            for ne, event_file in enumerate(self.obs_files[instr]["evts"]):
+               
+                print(f"\t<  INFO  > : Processing event file : {event_file}, ne={ne}")
+                if ne == 0:
+                    suffix = ""
+                else:
+                    suffix = f"_{ne}"
+                
+                self.obs_files[instr]["flare"].append(f"{self.workdir}/{self.ID}_{instr}_FlareBKGRate{suffix}.fits")
+                
+                if glob.glob(self.obs_files[instr]["flare"][ne]) == []:
+                    
+                    print(f'\t<  INFO  > : Using event list : {event_file}')
+
+                    if "PN" in instr:
+                        expression = '#XMMEA_EP&&(PI>10000.&&PI<12000.)&&(PATTERN==0.)'
+                    else:
+                        expression = '#XMMEA_EM&&(PI>10000)&&(PATTERN==0.)'
+                    inargs = [f'table={self.obs_files[instr]["evts"][ne]}', 'withrateset=Y', f'rateset={self.obs_files[instr]["flare"][ne]}',
+                            'maketimecolumn=Y', 'timebinsize=100', 'makeratecolumn=Y', f'expression={expression}']
+                    with open(f"{self.logdir}/{instr}_flares{suffix}.log","w+") as f:
+                        with contextlib.redirect_stdout(f):
+                            w("evselect", inargs).run()
+                #-- Plot the light curve for the flares --
+                if glob.glob(f"{self.plotdir}/{self.ID}_{instr}_FlareBKGRate{suffix}.pdf") == [] or self.replot == True:
+                    self.plot_flares_lc(instr,self.obs_files[instr]["flare"][ne],suffix)
+
+    def plot_flares_lc(self,instr,filename,suffix):
+        """
+
+        Plot the light curve of the flares
+
+        """
+
+        hdu_list = fits.open(filename, memmap=True)
+        lc_data = Table(hdu_list[1].data)
+        lc_data["TIME"] -= lc_data["TIME"][0]
+        fig, axis = plt.subplots(1, 1, figsize=(8, 5))
+        axis.plot(lc_data["TIME"], lc_data["RATE"])
+        if "PN" in instr:
+            axis.hlines(
+                0.4, lc_data["TIME"][0], lc_data["TIME"][-1], color="red", label="0.4 cts/s")
+        else:
+            axis.hlines(
+                0.35, lc_data["TIME"][0], lc_data["TIME"][-1], color="red", label="0.35 cts/s")
+        axis.legend()
+        axis.set_xlabel("Time (ks)")
+        axis.set_ylabel("count rate (cts/s)")
+        fig.suptitle(f"{self.ID} {instr} flare background light-curve")
+        fig.savefig(f"{self.plotdir}/{self.ID}_{instr}_FlareBKGRate{suffix}.pdf")
+
+    def gen_gti(self):
+        """
+        
+        Generate the GTI good time intervals
+        
+        """
+        print(f'<  INFO  > : Generating the GTI') 
+        for instr in self.instruments: 
+            print(f'\t<  INFO  > : Processing instrument : {instr}')
+            self.obs_files[instr]["gti"] = []
+            for ne, event_file in enumerate(self.obs_files[instr]["evts"]):
+               
+                print(f"\t<  INFO  > : Processing event file : {event_file}, ne={ne}")
+                if ne == 0:
+                    suffix = ""
+                else:
+                    suffix = f"_{ne}"
+                self.obs_files[instr]["gti"].append(f"{self.workdir}/{self.ID}_{instr}_GTI{suffix}.fits")
+                
+                if glob.glob(self.obs_files[instr]["gti"][ne]) == []:
+                    if "PN" in instr:
+                        expression = 'RATE<=0.4'
+                    else:
+                        expression = 'RATE<=0.35'
+                    inargs = [f'table={self.obs_files[instr]["flare"][ne]}',
+                            f'gtiset={self.obs_files[instr]["gti"][ne]}', f'expression={expression}']
+                    print(f'\t<  INFO  > : Running tabgtigen') 
+                    with open(f"{self.logdir}/{instr}_tabgtigen{suffix}.log","w+") as f:
+                        with contextlib.redirect_stdout(f):
+                            w("tabgtigen", inargs).run()
+                        
+                        
+    def gen_clean_evts(self):
+        """
+        
+        Generating cleaned event list
+        
+        """
+        print(f'<  INFO  > : Generating clean event lists') 
+        for instr in self.instruments: 
+            print(f'\t<  INFO  > : Processing instrument : {instr}')
+            self.obs_files[instr]['clean_evts'] = []
+            
+            for ne, event_file in enumerate(self.obs_files[instr]["evts"]):
+                print(f"\t<  INFO  > : Processing event file : {event_file}, ne={ne}")
+                if ne == 0:
+                    suffix = ""
+                else:
+                    suffix = f"_{ne}"
+                    
+                self.obs_files[instr]['clean_evts'].append(f"{self.workdir}/{self.ID}_{instr}_evts_clean{suffix}.fits")
+                
+                if glob.glob(self.obs_files[instr]['clean_evts'][ne]) == []:
+                    
+                    if "PN" in instr:
+                        expression = f'#XMMEA_EP && gti( {self.obs_files[instr]["gti"][ne]} , TIME ) && (PI >150)'
+                    else:
+                        expression = f'#XMMEA_EM && gti( {self.obs_files[instr]["gti"][ne]} , TIME ) && (PI >150)'
+
+                    inargs = [f'table={event_file}', 'withfilteredset=Y', f'filteredset={self.obs_files[instr]["clean_evts"][ne]}',
+                            'destruct=Y', 'keepfilteroutput=T', f'expression={expression}']
+                    print(f'<  INFO  > : Filtering flares to produce events list') 
+                    with open(f"{self.logdir}/{instr}_filtering_flares{suffix}.log","w+") as f:
+                        with contextlib.redirect_stdout(f):
+                            w("evselect", inargs).run()
+    
     def gen_EPIC_spectra(self, src_name, **kwargs):
         """
 
@@ -1518,6 +1649,7 @@ class ObservationXMM:
 
         for instr in self.instruments:
             print(f"\t<  INFO  > : Processing instrument : {instr}")
+            print(f"\t<  INFO  > : Cleaned event files : {self.obs_files[instr]['clean_evts']}")
 
             if instr == "EPN":
                 specchanmax = 20479
@@ -1546,133 +1678,145 @@ class ObservationXMM:
                     portion = f"p{partnumber}"
 
                 low, up = self.energy_range
+                
+                for ne, event_file in enumerate(self.obs_files[instr]["evts"]):
+                    print(f"\t<  INFO  > : Processing event file : {event_file}, ne={ne}")
+                    if ne == 0:
+                        suffix = ""
+                    else:
+                        suffix = f"_{ne}"
 
-                for name_tag in ["src", "bkg"]:
-                    # ---generate the spectrum
-                    output_spectrum = f"{self.workdir}/{self.ID}_{src_name}{instr}_spectrum_{name_tag}_{low/1000}-{up/1000}_{portion}.fits"
-                    # if instr == "EPN":
-                    #     flag = "(FLAG==0) "
-                    # elif instr == "EMOS1" or instr == "EMOS2":
-                    #     flag = "#XMMEA_EM "
-                    expression = (
-                        f"{flag} && (PATTERN <={pattern}) && ((X,Y) IN {self.regions[instr][name_tag]})"
-                        + timeslice
-                    )
-
-                    inargs = [
-                        f'table={self.obs_files[instr]["clean_evts"]}',
-                        "withspectrumset=yes",
-                        f"spectrumset={output_spectrum}",
-                        "energycolumn=PI",
-                        "spectralbinsize=5",
-                        "withspecranges=yes",
-                        "specchannelmin=0",
-                        f"specchannelmax={specchanmax}",
-                        f"expression={expression}",
-                    ]
-
-                    if glob.glob(output_spectrum) == []:
-                        print(
-                            f"<  INFO  > : Generate {name_tag} spectrum {low/1000}-{up/1000} keV"
+                    for name_tag in ["src", "bkg"]:
+                        # ---generate the spectrum
+                        output_spectrum = f"{self.workdir}/{self.ID}_{src_name}_{instr}_spectrum_{name_tag}_{low/1000}-{up/1000}_{portion}{suffix}.fits"
+                        # if instr == "EPN":
+                        #     flag = "(FLAG==0) "
+                        # elif instr == "EMOS1" or instr == "EMOS2":
+                        #     flag = "#XMMEA_EM "
+                        
+                        if len(self.obs_files[instr]["evts"]) > 1:
+                            reg = self.regions[instr][name_tag][ne]
+                        else:
+                            reg = self.regions[instr][name_tag]
+                        expression = (
+                            f"{flag} && (PATTERN <={pattern}) && ((X,Y) IN {reg})"
+                            + timeslice
                         )
-                        with open(
-                            f"{self.logdir}/{src_name}{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_spectrum.log",
-                            "w+",
-                        ) as f:
-                            with contextlib.redirect_stdout(f):
-                                w("evselect", inargs).run()
 
-                        # ---calculate the area of the regions
                         inargs = [
+                            f'table={self.obs_files[instr]["clean_evts"][ne]}',
+                            "withspectrumset=yes",
                             f"spectrumset={output_spectrum}",
-                            f'badpixlocation={self.obs_files[instr]["clean_evts"]}',
+                            "energycolumn=PI",
+                            "spectralbinsize=5",
+                            "withspecranges=yes",
+                            "specchannelmin=0",
+                            f"specchannelmax={specchanmax}",
+                            f"expression={expression}",
                         ]
 
+                        if glob.glob(output_spectrum) == []:
+                            print(
+                                f"<  INFO  > : Generate {name_tag} spectrum {low/1000}-{up/1000} keV"
+                            )
+                            with open(
+                                f"{self.logdir}/{src_name}_{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_spectrum{suffix}.log",
+                                "w+",
+                            ) as f:
+                                with contextlib.redirect_stdout(f):
+                                    w("evselect", inargs).run()
+
+                            # ---calculate the area of the regions
+                            inargs = [
+                                f"spectrumset={output_spectrum}",
+                                f'badpixlocation={self.obs_files[instr]["clean_evts"][ne]}',
+                            ]
+
+                            print(
+                                f"<  INFO  > : Running backscale on {name_tag} spectrum {low/1000}-{up/1000} keV"
+                            )
+                            with open(
+                                f"{self.logdir}/{src_name}_{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_backscale{suffix}.log",
+                                "w+",
+                            ) as f:
+                                with contextlib.redirect_stdout(f):
+                                    w("backscale", inargs).run()
+
+                    src_spectrum = f"{self.ID}_{src_name}_{instr}_spectrum_src_{low/1000}-{up/1000}_{portion}{suffix}.fits"
+                    bkg_spectrum = f"{self.ID}_{src_name}_{instr}_spectrum_bkg_{low/1000}-{up/1000}_{portion}{suffix}.fits"
+
+                    # ----generate the redistribution matrix
+                    output_rmf = (
+                        f"{self.ID}_{src_name}_{instr}_{low/1000}-{up/1000}_{portion}{suffix}.rmf"
+                    )
+                    if glob.glob(output_rmf) == []:
                         print(
-                            f"<  INFO  > : Running backscale on {name_tag} spectrum {low/1000}-{up/1000} keV"
+                            f"<  INFO  > : Running rmfgen to generate the response matrix {low/1000}-{up/1000} keV"
                         )
+                        inargs = [f"spectrumset={src_spectrum}", f"rmfset={output_rmf}"]
+
                         with open(
-                            f"{self.logdir}/{src_name}{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_backscale.log",
+                            f"{self.logdir}/{src_name}_{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_rmfgen{suffix}.log",
                             "w+",
                         ) as f:
                             with contextlib.redirect_stdout(f):
-                                w("backscale", inargs).run()
-
-                src_spectrum = f"{self.ID}_{src_name}{instr}_spectrum_src_{low/1000}-{up/1000}_{portion}.fits"
-                bkg_spectrum = f"{self.ID}_{src_name}{instr}_spectrum_bkg_{low/1000}-{up/1000}_{portion}.fits"
-
-                # ----generate the redistribution matrix
-                output_rmf = (
-                    f"{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.rmf"
-                )
-                if glob.glob(output_rmf) == []:
-                    print(
-                        f"<  INFO  > : Running rmfgen to generate the response matrix {low/1000}-{up/1000} keV"
+                                w("rmfgen", inargs).run()
+                    # ----generate the ancillary file
+                    output_arf = (
+                        f"{self.ID}_{src_name}_{instr}_{low/1000}-{up/1000}_{portion}{suffix}.arf"
                     )
-                    inargs = [f"spectrumset={src_spectrum}", f"rmfset={output_rmf}"]
+                    if glob.glob(output_arf) == []:
+                        print(
+                            f"<  INFO  > : Running arfgen to generate the ancillary file {low/1000}-{up/1000} keV"
+                        )
+                        inargs = [
+                            f"spectrumset={src_spectrum}",
+                            f"arfset={output_arf}",
+                            f'applyabsfluxcorr={"yes"if abscor else "no"}',
+                            "withrmfset=yes",
+                            f"rmfset={output_rmf}",
+                            f'badpixlocation={self.obs_files[instr]["clean_evts"][ne]}',
+                            "detmaptype=psf",
+                        ]
 
-                    with open(
-                        f"{self.logdir}/{src_name}{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_rmfgen.log",
-                        "w+",
-                    ) as f:
-                        with contextlib.redirect_stdout(f):
-                            w("rmfgen", inargs).run()
-                # ----generate the ancillary file
-                output_arf = (
-                    f"{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.arf"
-                )
-                if glob.glob(output_arf) == []:
-                    print(
-                        f"<  INFO  > : Running arfgen to generate the ancillary file {low/1000}-{up/1000} keV"
+                        with open(
+                            f"{self.logdir}/{src_name}_{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_arfgen{suffix}.log",
+                            "w+",
+                        ) as f:
+                            with contextlib.redirect_stdout(f):
+                                w("arfgen", inargs).run()
+
+                    # ----grouping the spectrum
+                    grouped_spectrum = f"{self.ID}_{src_name}_{instr}_grouped_spectrum_{low/1000}-{up/1000}_{portion}{suffix}.fits"
+                    rmf_name = (
+                        f"{self.ID}_{src_name}_{instr}_{low/1000}-{up/1000}_{portion}{suffix}.rmf"
                     )
-                    inargs = [
-                        f"spectrumset={src_spectrum}",
-                        f"arfset={output_arf}",
-                        f'applyabsfluxcorr={"yes"if abscor else "no"}',
-                        "withrmfset=yes",
-                        f"rmfset={output_rmf}",
-                        f'badpixlocation={self.obs_files[instr]["clean_evts"]}',
-                        "detmaptype=psf",
-                    ]
-
-                    with open(
-                        f"{self.logdir}/{src_name}{instr}_{name_tag}_{low/1000}-{up/1000}_{portion}_arfgen.log",
-                        "w+",
-                    ) as f:
-                        with contextlib.redirect_stdout(f):
-                            w("arfgen", inargs).run()
-
-                # ----grouping the spectrum
-                grouped_spectrum = f"{self.ID}_{src_name}{instr}_grouped_spectrum_{low/1000}-{up/1000}_{portion}.fits"
-                rmf_name = (
-                    f"{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.rmf"
-                )
-                arf_name = (
-                    f"{self.ID}_{src_name}{instr}_{low/1000}-{up/1000}_{portion}.arf"
-                )
-
-                if glob.glob(grouped_spectrum) == []:
-                    print(
-                        f"<  INFO  > : Running specgroup to group the spectral files {low/1000}-{up/1000} keV"
+                    arf_name = (
+                        f"{self.ID}_{src_name}_{instr}_{low/1000}-{up/1000}_{portion}{suffix}.arf"
                     )
-                    inargs = [
-                        f"spectrumset={src_spectrum}",
-                        oversample,
-                        "withoversampling=yes",
-                        grouping,
-                        min_group,
-                        "withbgdset=yes",
-                        "witharfset=yes",
-                        "withrmfset=yes",
-                        f"rmfset={rmf_name}",
-                        f"arfset={arf_name}",
-                        f"backgndset={bkg_spectrum}",
-                        f"groupedset={grouped_spectrum}",
-                    ]
 
-                    with open(
-                        f"{self.logdir}/{src_name}{instr}_{low/1000}-{up/1000}_{portion}_specgroup.log",
-                        "w+",
-                    ) as f:
-                        with contextlib.redirect_stdout(f):
-                            w("specgroup", inargs).run()
+                    if glob.glob(grouped_spectrum) == []:
+                        print(
+                            f"<  INFO  > : Running specgroup to group the spectral files {low/1000}-{up/1000} keV"
+                        )
+                        inargs = [
+                            f"spectrumset={src_spectrum}",
+                            oversample,
+                            "withoversampling=yes",
+                            grouping,
+                            min_group,
+                            "withbgdset=yes",
+                            "witharfset=yes",
+                            "withrmfset=yes",
+                            f"rmfset={rmf_name}",
+                            f"arfset={arf_name}",
+                            f"backgndset={bkg_spectrum}",
+                            f"groupedset={grouped_spectrum}",
+                        ]
+
+                        with open(
+                            f"{self.logdir}/{src_name}_{instr}_{low/1000}-{up/1000}_{portion}_specgroup{suffix}.log",
+                            "w+",
+                        ) as f:
+                            with contextlib.redirect_stdout(f):
+                                w("specgroup", inargs).run()
