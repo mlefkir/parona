@@ -668,14 +668,14 @@ class ObservationXMM:
             else:
                 self.obs_files[instr][
                     "epatplot"
-                ] = f"{self.ID}_{src_name}{instr}_pat.ps"
+                ] = f"{self.ID}_{src_name}{instr}_pat.pdf"
                 self.obs_files[instr][
                     "clean_filt"
                 ] = f"{self.workdir}/{self.ID}_{instr}_clean_filtered.fits"
 
             for ne, evts in enumerate(self.obs_files[instr]["evts"]):
                 suffix = "" if ne == 0 else f"_{ne}"
-                curr_pat = f"{self.ID}_{src_name}{instr}_pat{suffix}.ps"
+                curr_pat = f"{self.ID}_{src_name}{instr}_pat{suffix}.pdf"
                 curr_clean = (
                     f"{self.workdir}/{self.ID}_{instr}_clean_filtered{suffix}.fits"
                 )
@@ -685,7 +685,7 @@ class ObservationXMM:
                     src = self.regions[instr]["src"][ne]
                 else:
                     src = self.regions[instr]["src"]
-
+                print(curr_pat)
                 if glob.glob(f"{self.plotdir}/{curr_pat}") == []:
                     inargs = [
                         f"table={evts}",
@@ -701,6 +701,7 @@ class ObservationXMM:
                     ) as f:
                         with contextlib.redirect_stdout(f):
                             w("evselect", inargs).run()
+                        
                     inargs = [
                         f"set={curr_clean}",
                         f"plotfile={curr_pat}",
